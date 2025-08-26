@@ -1,4 +1,5 @@
 .venv/
+.venv_39/
 old_files/
 imagenet_classes/
 .ruff_cache/
