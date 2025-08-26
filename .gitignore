@@ -1,1 +1,5 @@
 .venv/
+old_files/
+imagenet_classes/
+.ruff_cache/
+.vscode/
