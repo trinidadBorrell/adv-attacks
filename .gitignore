@@ -3,3 +3,6 @@ old_files/
 imagenet_classes/
 .ruff_cache/
 .vscode/
+.DS_Store
+*__pycache__*
+results/
