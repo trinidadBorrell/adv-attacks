@@ -17,7 +17,7 @@ import logging
 import sys
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -39,14 +39,14 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-def load_imagenet_class_names() -> Dict[int, str]:
+def load_imagenet_class_names() -> dict[int, str]:
     """Load ImageNet class names from file."""
     class_names = {}
     try:
         with open("imagenet_classes/imagenet_classes.txt", "r") as f:
             for line in f:
                 line = line.strip()
-                if line and "," in line and not line.startswith("List"):
+                if line and "," in line and not line.startswith("list"):
                     parts = line.split(", ", 1)
                     if len(parts) == 2:
                         class_id = int(parts[0])
@@ -89,7 +89,7 @@ class ImageValidator:
 
     def get_top_predictions(
         self, logits: torch.Tensor, top_k: int = 1000
-    ) -> Tuple[List[int], List[float]]:
+    ) -> tuple[list[int], list[float]]:
         """Get top-k predictions from logits."""
         probs = F.softmax(logits, dim=1)
         top_probs, top_indices = torch.topk(probs, top_k, dim=1)
@@ -99,7 +99,7 @@ class ImageValidator:
 
     def test_1_top_category_check(
         self, original_logits: torch.Tensor, original_coarse_class: str
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Test 1: Check if top category in original image contains the category of interest.
         """
@@ -117,9 +117,7 @@ class ImageValidator:
             self.coarse_labels.index(original_coarse_class)
         ]
 
-        logger.info(
-            f"Original coarse class '{original_coarse_class}' indices: {original_coarse_indices}"
-        )
+        # Coarse class indices determined for validation
 
         # Check if TOP (first) category contains original coarse category
         original_top_prediction = original_top_indices[0]
@@ -148,7 +146,7 @@ class ImageValidator:
 
     def test_2_coarse_score_check(
         self, original_logits: torch.Tensor, original_coarse_class: str
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Test 2: Check if coarse score in original image is > 0.
         """
@@ -205,10 +203,11 @@ class ImageValidator:
         original_image_path: str,
         original_fine_class: int,
         original_coarse_class: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
+        test_type: int = 1,
+    ) -> tuple[bool, dict[str, Any]]:
         """
-        Validate an image using both test criteria.
-        Returns True if both tests pass, False otherwise.
+        Validate an image using the specified test type.
+        Returns True if the specified test passes, False otherwise.
         """
         logger.info(f"Validating image: {original_image_path}")
 
@@ -218,36 +217,47 @@ class ImageValidator:
             self.normalize(original_image), self.models
         )
 
-        # Perform both tests
-        test1_success, test1_results = self.test_1_top_category_check(
-            original_logits, original_coarse_class
-        )
-        test2_success, test2_results = self.test_2_coarse_score_check(
-            original_logits, original_coarse_class
-        )
+        # Perform only the specified test
+        if test_type == 1:
+            test_success, test_results = self.test_1_top_category_check(
+                original_logits, original_coarse_class
+            )
+        elif test_type == 2:
+            test_success, test_results = self.test_2_coarse_score_check(
+                original_logits, original_coarse_class
+            )
+        else:
+            raise ValueError(f"Invalid test_type: {test_type}. Must be 1 or 2.")
 
-        # Both tests must pass
-        overall_success = test1_success and test2_success
+        # Get top prediction details for metadata
+        original_top_indices, original_top_probs = self.get_top_predictions(original_logits, top_k=5)
+        top_class_id = original_top_indices[0]
+        top_class_name = self.class_names.get(top_class_id, f"class_{top_class_id}")
+        top_probability = original_top_probs[0]
 
         # Create comprehensive results
         validation_results = {
             "original_image_path": original_image_path,
             "original_fine_class": original_fine_class,
             "original_coarse_class": original_coarse_class,
-            "overall_success": overall_success,
-            "test1_success": test1_success,
-            "test2_success": test2_success,
-            "test1_results": test1_results,
-            "test2_results": test2_results,
+            "test_type": test_type,
+            "overall_success": test_success,
+            "test_results": test_results,
+            "original_prediction": {
+                "top_class_id": top_class_id,
+                "top_class_name": top_class_name,
+                "top_probability": top_probability,
+                "top_5_classes": original_top_indices[:5],
+                "top_5_probabilities": original_top_probs[:5]
+            },
             "validation_timestamp": datetime.now().isoformat(),
         }
 
         logger.info(
-            f"Validation complete: Overall success={overall_success}, "
-            f"Test1={test1_success}, Test2={test2_success}"
+            f"Validation complete: Test {test_type} success={test_success}"
         )
 
-        return overall_success, validation_results
+        return test_success, validation_results
 
 
 def main():

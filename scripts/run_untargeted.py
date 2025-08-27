@@ -1,248 +1,178 @@
 #!/usr/bin/env python3
 """
-Untargeted Attack Runner Script
-
-This script runs untargeted adversarial attacks on a set of images with different
-epsilons and categories. It validates each image first, then generates attacks
-and tests them if validation passes.
+Clean Untargeted Attack Pipeline
 
 Usage:
-    python run_untargeted.py <epsilons> <categories> <imagenet_folder_path> <test_type> <output>
-
-Arguments:
-    epsilons: Comma-separated list of epsilon values (e.g., "8.0,16.0,32.0")
-    categories: Comma-separated list of coarse categories (e.g., "fish,bird,mammal")
-    imagenet_folder_path: Path to the miniImageNet folder (structure: miniImageNet/{folder}/{image_files..})
-    test_type: Test type to use (1 or 2)
-    output: Output base directory
+    python run_untargeted_clean.py <epsilons> <categories> [imagenet_folder] <test_type> <output>
 """
 
 import argparse
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import List
 
-# Setup logging
+# Add src to path
+sys.path.append(str(Path(__file__).parent.parent))
+from src.mapping import get_representative_class_for_category
+from src.simple_pipeline import run_complete_attack_pipeline
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def log_message(message: str):
-    """Log message with timestamp."""
-    logger.info(message)
-
-
 def find_images(folder_path: str) -> List[str]:
-    """Find all image files in the folder and its subfolders."""
+    """Find all image files in the folder."""
     image_extensions = {".jpg", ".jpeg", ".png"}
     image_paths = []
-
+    
     folder = Path(folder_path)
     if not folder.exists():
-        logger.error(f"Folder not found: {folder_path}")
         return []
-
-    # Walk through all subdirectories
+    
     for root, dirs, files in os.walk(folder):
         for file in files:
             if Path(file).suffix.lower() in image_extensions:
                 image_paths.append(str(Path(root) / file))
-
-    logger.info(f"Found {len(image_paths)} images in {folder_path}")
+    
     return image_paths
 
 
-def run_command(cmd: List[str], description: str) -> bool:
-    """Run a command and return success status."""
-    try:
-        log_message(f"Running: {description}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        log_message(f"✓ {description} completed successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        log_message(f"✗ {description} failed: {e}")
-        if e.stdout:
-            log_message(f"stdout: {e.stdout}")
-        if e.stderr:
-            log_message(f"stderr: {e.stderr}")
-        return False
-    except Exception as e:
-        log_message(f"✗ {description} failed with exception: {e}")
-        return False
-
-
 def main():
-    """Main function to run untargeted attacks."""
-
     parser = argparse.ArgumentParser(description="Run untargeted adversarial attacks")
-    parser.add_argument(
-        "epsilons", help="Comma-separated list of epsilon values (e.g., '8.0,16.0')"
-    )
-    parser.add_argument(
-        "categories",
-        help="Comma-separated list of coarse categories (e.g., 'fish,bird')",
-    )
-    parser.add_argument("imagenet_folder_path", help="Path to the miniImageNet folder")
-    parser.add_argument(
-        "test_type", type=int, choices=[1, 2], help="Test type to use (1 or 2)"
-    )
-    parser.add_argument("output", help="Output base directory")
-
+    parser.add_argument("epsilons", help="Comma-separated epsilon values (e.g., '8.0,16.0')")
+    parser.add_argument("categories", help="Comma-separated categories (e.g., 'cat,dog')")
+    parser.add_argument("imagenet_folder", help="Path to ImageNet folder")
+    parser.add_argument("test_type", type=int, choices=[1, 2], help="Test type (1 or 2)")
+    parser.add_argument("output", help="Output directory")
+    
     args = parser.parse_args()
-
-    # Parse comma-separated arguments
+    
+    # Parse arguments
     epsilons = [float(eps.strip()) for eps in args.epsilons.split(",")]
     categories = [cat.strip() for cat in args.categories.split(",")]
-
-    # Get project root
+    
+    # Change to project root
     project_root = Path(__file__).parent.parent
-
-    # Check if required files exist
-    val_script = project_root / "src" / "untargeted" / "val.py"
-    gen_script = project_root / "src" / "untargeted" / "gen.py"
-    test_script = project_root / "src" / "untargeted" / "test.py"
-
-    for script_path in [val_script, gen_script, test_script]:
-        if not script_path.exists():
-            logger.error(f"Script not found: {script_path}")
-            sys.exit(1)
-
-    # Check if miniImageNet folder exists
-    if not Path(args.imagenet_folder_path).exists():
-        logger.error(f"miniImageNet folder not found: {args.imagenet_folder_path}")
-        sys.exit(1)
-
+    os.chdir(project_root)
+    
+    # Check if mini-ImageNet dataset exists
+    if not args.imagenet_folder:
+        logger.error("Please provide a path to the ImageNet folder. If not downloaded, please run: python src/download_images.py")
+        return
+    
+    mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
+    
+    if not mini_imagenet_path.exists():
+        logger.error(f"Mini-ImageNet dataset not found at {mini_imagenet_path}. Please run: python src/download_images.py")
+        return
+    
+    # Load 16 class mappings and find which ones have available synsets
+    def load_available_class_mappings():
+        import re
+        
+        # Get available synsets in dataset
+        available_synsets = [d.name for d in mini_imagenet_path.iterdir() if d.is_dir()]
+        
+        # Load 16 class mapping
+        with open("imagenet_classes/16_class_mapping.txt", "r") as f:
+            content = f.read()
+        
+        # Parse mapping to find which classes have available synsets
+        class_synsets = {}
+        for line in content.split('\n'):
+            if '=' in line and '[' in line:
+                category = line.split('=')[0].strip()
+                synsets_match = re.findall(r'n\d{8}', line)
+                if synsets_match:
+                    # Only keep synsets that are actually available in our dataset
+                    available_for_category = [s for s in synsets_match if s in available_synsets]
+                    if available_for_category:
+                        class_synsets[category] = available_for_category
+        
+        return class_synsets
+    
+    class_mappings = load_available_class_mappings()
+    logger.info(f"Available classes with synsets: {[(k, len(v)) for k, v in class_mappings.items()]}")
+    
+    # Get images for each requested category
+    image_paths_by_category = {}
+    
+    for category in categories:
+        if category not in class_mappings:
+            logger.warning(f"Category '{category}' not found in class mappings")
+            image_paths_by_category[category] = []
+            continue
+            
+        category_images = []
+        synsets = class_mappings[category]
+        
+        for synset in synsets:
+            synset_dir = mini_imagenet_path / synset
+            if synset_dir.exists():
+                images = list(synset_dir.glob("*.JPEG")) + list(synset_dir.glob("*.jpg")) + list(synset_dir.glob("*.png"))
+                category_images.extend([str(img) for img in images])
+                logger.info(f"Found {len(images)} images in synset {synset} for category {category}")
+        
+        image_paths_by_category[category] = category_images
+        logger.info(f"Total images for {category}: {len(category_images)}")
+    
     # Create output directory
-    output_base = Path(args.output)
-    output_base.mkdir(parents=True, exist_ok=True)
-
-    # Log start
-    log_message("Starting untargeted attack runner")
-    log_message(f"Epsilons: {epsilons}")
-    log_message(f"Categories: {categories}")
-    log_message(f"miniImageNet folder: {args.imagenet_folder_path}")
-    log_message(f"Test type: {args.test_type}")
-    log_message(f"Output base: {args.output}")
-
-    # Statistics
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Run pipeline
     total_images = 0
-    valid_images = 0
     successful_attacks = 0
-
-    # Find all images
-    image_paths = find_images(args.imagenet_folder_path)
-
+    
+    logger.info("Starting attack pipeline...")
+    logger.info(f"Epsilons: {epsilons}")
+    logger.info(f"Categories: {categories}")
+    logger.info(f"Test type: {args.test_type}")
+    
     for eps in epsilons:
-        log_message(f"Processing epsilon: {eps}")
-
         for category in categories:
-            log_message(f"Processing category: {category}")
-
-            # Create category-specific output directory
-            category_output = output_base / "exp2" / category / f"epsilon_{eps}"
-            category_output.mkdir(parents=True, exist_ok=True)
-
-            for image_path in image_paths:
+            fine_class_id = get_representative_class_for_category(category)
+            image_paths = image_paths_by_category.get(category, [])
+            
+            if not image_paths:
+                logger.warning(f"No images found for category {category}")
+                continue
+            
+            logger.info(f"Processing {len(image_paths)} images for {category} (eps={eps})")
+            aimed_successful_attacks = 5
+            for image_path in image_paths:  # Process 20 images per category
+                if successful_attacks >= aimed_successful_attacks:
+                    break
                 total_images += 1
-
-                # Get image name without extension
                 image_name = Path(image_path).stem
-
-                log_message(f"Processing image: {image_name}")
-
-                # Step 1: Validate image
-                val_cmd = [sys.executable, str(val_script), image_path, "0", category]
-
-                if run_command(val_cmd, f"Validating {image_name}"):
-                    valid_images += 1
-                    log_message(f"Validation PASSED for {image_name}")
-
-                    # Create image-specific output directory ONLY after validation succeeds
-                    image_output = category_output / image_name
-                    image_output.mkdir(exist_ok=True)
-
-                    # Step 2: Generate untargeted attack
-                    gen_cmd = [
-                        sys.executable,
-                        str(gen_script),
-                        image_path,
-                        "0",
-                        category,
-                        str(eps),
-                    ]
-
-                    if run_command(
-                        gen_cmd, f"Generating untargeted attack for {image_name}"
-                    ):
-                        log_message("Untargeted attack generated successfully")
-
-                        # Step 3: Generate targeted attack
-                        gen_targeted_cmd = [
-                            sys.executable,
-                            str(gen_script),
-                            image_path,
-                            "0",
-                            category,
-                            str(eps),
-                            "--targeted",
-                        ]
-
-                        if run_command(
-                            gen_targeted_cmd,
-                            f"Generating targeted attack for {image_name}",
-                        ):
-                            log_message("Targeted attack generated successfully")
-
-                            # Step 4: Test attacks
-                            test_cmd = [
-                                sys.executable,
-                                str(test_script),
-                                str(args.test_type),
-                                image_path,
-                                "untargeted.png",
-                                "targeted.png",
-                                "0",
-                                category,
-                                str(eps),
-                            ]
-
-                            if run_command(
-                                test_cmd, f"Testing attacks for {image_name}"
-                            ):
-                                successful_attacks += 1
-                                log_message(f"Test PASSED for {image_name}")
-                            else:
-                                log_message(f"Test FAILED for {image_name}")
-                        else:
-                            log_message(
-                                f"Targeted attack generation FAILED for {image_name}"
-                            )
-                    else:
-                        log_message(
-                            f"Untargeted attack generation FAILED for {image_name}"
-                        )
-                else:
-                    log_message(
-                        f"Validation FAILED for {image_name} - skipping to next image"
+                
+                try:
+                    success, results, output_folder = run_complete_attack_pipeline(
+                        image_path=image_path,
+                        fine_class_id=fine_class_id,
+                        coarse_class=category,
+                        epsilon=eps,
+                        test_type=args.test_type,
+                        output_dir=output_dir
                     )
-
-                log_message(f"Completed processing {image_name}")
-                log_message("---")
-
-    # Final summary
-    log_message("=== FINAL SUMMARY ===")
-    log_message(f"Total images processed: {total_images}")
-    log_message(f"Valid images: {valid_images}")
-    log_message(f"Successful attacks: {successful_attacks}")
+                    
+                    if success:
+                        successful_attacks += 1
+                        logger.info(f"SUCCESS: {image_name} -> {output_folder}")
+                    else:
+                        logger.info(f"FAILED: {image_name}")
+                        
+                except Exception as e:
+                    logger.error(f"ERROR processing {image_name}: {e}")
+    
+    # Summary
+    logger.info("=== SUMMARY ===")
+    logger.info(f"Total images: {total_images}")
+    logger.info(f"Successful attacks: {successful_attacks}")
     if total_images > 0:
-        success_rate = (successful_attacks * 100) / total_images
-        log_message(f"Success rate: {success_rate:.2f}%")
-    log_message(f"Results saved to: {output_base}/exp2/")
-
-    log_message("Untargeted attack runner completed successfully!")
+        logger.info(f"Success rate: {(successful_attacks/total_images)*100:.1f}%")
 
 
 if __name__ == "__main__":
