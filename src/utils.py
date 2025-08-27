@@ -58,7 +58,7 @@ def load_ensemble(
         for param in model.parameters():
             param.requires_grad = False
         prepared_models.append(model)
-        logger.info(f"Model {i + 1}/6 loaded")
+        # Model loaded silently
 
     return prepared_models
 
@@ -370,7 +370,7 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         if indices:
             valid_labels.append(label)
             valid_indices.append(indices)
-            logger.info(f"Coarse class '{label}': {len(indices)} ImageNet classes")
+            # Coarse class mapping loaded silently
 
     return valid_labels, valid_indices
 
@@ -391,7 +391,7 @@ def get_ensemble_logits(image: torch.Tensor, models: List[nn.Module]) -> torch.T
 
     for model in models:
         output = model(image)
-        ensemble_outputs.append(output.detach())
+        ensemble_outputs.append(output)  # Keep gradients for adversarial attack generation
 
     # Arithmetic mean of logits
     ensemble_logits = torch.mean(torch.stack(ensemble_outputs), dim=0)

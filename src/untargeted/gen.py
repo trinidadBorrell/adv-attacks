@@ -24,6 +24,8 @@ import warnings
 
 import torch
 import torch.nn.functional as F
+import numpy as np
+from PIL import Image
 
 # Import functions from utils module
 from ..utils import (
@@ -76,9 +78,9 @@ class AdversarialGenerator:
 
         # Prepare image for gradient computation
         image_var = image.clone().detach().requires_grad_(True)
-        normalized_image = self.normalize(image_var)  # Why is this needed?
-
-        # Step 0: Get ensemble logits
+        
+        # Step 0: Get ensemble logits (normalize inside the gradient computation)
+        normalized_image = self.normalize(image_var)
         ensemble_logits = get_ensemble_logits(normalized_image, self.models)
 
         # Step 1: Get probabilities from ensemble logits using softmax
@@ -122,13 +124,14 @@ class AdversarialGenerator:
         coarse_indices = self.coarse_indices[self.coarse_labels.index(target_class)]
 
         gradients = torch.zeros_like(image_var)
-        for class_idx in coarse_indices:
+        for i, class_idx in enumerate(coarse_indices):
             # Step 2.1: Get probability of fine-grained class of coarse class (P_ens(y|X))
             prob_target_class = probs[0, class_idx]  # P_ens(y|X)
             # Step 2.2: Get loss of fine-grained class of coarse class (-log(P_ens(y|X)))
             loss = -torch.log(prob_target_class)
-            # Step 2.3: Get gradient of loss
-            gradient = torch.autograd.grad(loss, image_var, retain_graph=False)[0]
+            # Step 2.3: Get gradient of loss (retain graph for all but last iteration)
+            is_last_iteration = (i == len(coarse_indices) - 1)
+            gradient = torch.autograd.grad(loss, image_var, retain_graph=not is_last_iteration)[0]
             # Step 2.4: Get sign of gradient
             sign_grad = gradient.sign()
             # Step 2.5: Add sign of gradient to total gradient
@@ -144,13 +147,25 @@ class AdversarialGenerator:
         return load_image(image_path, self.device)
 
 
+def save_tensor_as_image(tensor: torch.Tensor, save_path: str):
+    """Save tensor as image file."""
+    # Convert tensor to numpy array
+    image_np = tensor.squeeze().detach().cpu().numpy().transpose(1, 2, 0)
+    # Denormalize and convert to uint8
+    image_np = np.clip(image_np * 255, 0, 255).astype(np.uint8)
+    # Save as image
+    Image.fromarray(image_np).save(save_path)
+    logger.info(f"Saved image to: {save_path}")
+
+
 def main():
     """Main function following exact specifications."""
 
-    if len(sys.argv) != 4:
-        print("Usage: python gen.py <image_path> <original_class> <epsilon>")
+    if len(sys.argv) != 5:
+        print("Usage: python gen.py <image_path> <original_fine_class> <original_coarse_class> <epsilon>")
         print("  image_path: Path to input image")
-        print("  original_class: ImageNet class ID (0-999)")
+        print("  original_fine_class: ImageNet class ID (0-999)")
+        print("  original_coarse_class: Coarse class label")
         print("  epsilon: Perturbation magnitude (e.g., 8.0)")
         sys.exit(1)
 
@@ -187,14 +202,9 @@ def main():
             f"Generating targeted attack towards original class {original_coarse_class}..."
         )
 
-        if original_coarse_class is not None:
-            targeted_image = generator.generate_targeted_attack(
-                image, original_coarse_class, epsilon
-            )
-        else:
-            targeted_image = generator.generate_targeted_attack(
-                image, original_fine_class, epsilon
-            )
+        targeted_image = generator.generate_targeted_attack(
+            image, original_coarse_class, epsilon
+        )
 
         # Calculate perturbation norms
         untargeted_norm = torch.norm(untargeted_image - image, p=float("inf")).item()
@@ -203,9 +213,9 @@ def main():
         print("\nAttack generation completed!")
         print(f"Untargeted perturbation L∞ norm: {untargeted_norm:.6f}")
         print(f"Targeted perturbation L∞ norm: {targeted_norm:.6f}")
-        print("Returning adversarial image tensors (not saving to files)")
-
-        # Return tensors for use by test.py
+        print("Returning adversarial image tensors (will save only if tests pass)")
+        
+        # Return tensors for testing - will only be saved if tests pass
         return (
             untargeted_image,
             targeted_image,

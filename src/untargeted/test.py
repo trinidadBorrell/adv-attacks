@@ -23,7 +23,7 @@ import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import torch
@@ -47,14 +47,14 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-def load_imagenet_class_names() -> Dict[int, str]:
+def load_imagenet_class_names() -> dict[int, str]:
     """Load ImageNet class names from file."""
     class_names = {}
     try:
         with open("imagenet_classes/imagenet_classes.txt", "r") as f:
             for line in f:
                 line = line.strip()
-                if line and "," in line and not line.startswith("List"):
+                if line and "," in line and not line.startswith("list"):
                     parts = line.split(", ", 1)
                     if len(parts) == 2:
                         class_id = int(parts[0])
@@ -90,11 +90,14 @@ class AdversarialTester:
         # Load 16-class coarse mappings
         self.coarse_labels, self.coarse_indices = get_correct_coarse_mappings()
 
+        # Load ImageNet class names
+        self.class_names = load_imagenet_class_names()
+
         logger.info("Adversarial tester ready")
 
     def get_top_predictions(
         self, logits: torch.Tensor, top_k: int = 1000
-    ) -> Tuple[List[int], List[float]]:
+    ) -> tuple[list[int], list[float]]:
         """Get top-k predictions from logits."""
         probs = F.softmax(logits, dim=1)
         top_probs, top_indices = torch.topk(probs, top_k, dim=1)
@@ -107,7 +110,7 @@ class AdversarialTester:
         untargeted_logits: torch.Tensor,
         targeted_logits: torch.Tensor,
         original_coarse_class: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Test 1: Check if top category in untargeted image does not contain original coarse category,
         and if top category in targeted image contains original coarse category.
@@ -122,17 +125,14 @@ class AdversarialTester:
             targeted_logits
         )
 
-        logger.info(f"Untargeted top predictions: {untargeted_top_indices}")
-        logger.info(f"Targeted top predictions: {targeted_top_indices}")
+        # Predictions computed for testing
 
         # Get original coarse class indices
         original_coarse_indices = self.coarse_indices[
             self.coarse_labels.index(original_coarse_class)
         ]
 
-        logger.info(
-            f"Original coarse class '{original_coarse_class}' indices: {original_coarse_indices}"
-        )
+        # Coarse class indices determined for testing
 
         # Check untargeted: TOP (first) category should NOT contain original coarse category
         untargeted_top_prediction = untargeted_top_indices[0]
@@ -166,7 +166,7 @@ class AdversarialTester:
         untargeted_logits: torch.Tensor,
         targeted_logits: torch.Tensor,
         original_coarse_class: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Test 2: Check if coarse score in untargeted image is < 0 and in targeted image is > 0.
         """
@@ -240,7 +240,7 @@ class AdversarialTester:
         targeted_image: torch.Tensor,
         untargeted_logits: torch.Tensor,
         targeted_logits: torch.Tensor,
-        test_results: Dict[str, Any],
+        test_results: dict[str, Any],
         original_image_path: str,
         epsilon: float,
         output_folder: str = "successful_attacks",
@@ -395,6 +395,72 @@ class AdversarialTester:
         Image.fromarray(image_np).save(path)
 
 
+def test_adversarial_tensors(
+    test_type: int,
+    original_image: torch.Tensor,
+    untargeted_image: torch.Tensor,
+    targeted_image: torch.Tensor,
+    original_coarse_class: str,
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+) -> tuple[bool, dict[str, Any]]:
+    """Test adversarial attack tensors directly without file I/O."""
+    
+    # Initialize tester
+    tester = AdversarialTester(device)
+    
+    # Get ensemble logits
+    logger.info("Computing ensemble logits...")
+    untargeted_logits = get_ensemble_logits(
+        tester.normalize(untargeted_image), tester.models
+    )
+    targeted_logits = get_ensemble_logits(
+        tester.normalize(targeted_image), tester.models
+    )
+    
+    # Get prediction details for metadata
+    untargeted_top_indices, untargeted_top_probs = tester.get_top_predictions(untargeted_logits, top_k=5)
+    targeted_top_indices, targeted_top_probs = tester.get_top_predictions(targeted_logits, top_k=5)
+    
+    untargeted_top_class_id = untargeted_top_indices[0]
+    untargeted_top_class_name = tester.class_names.get(untargeted_top_class_id, f"class_{untargeted_top_class_id}")
+    untargeted_top_probability = untargeted_top_probs[0]
+    
+    targeted_top_class_id = targeted_top_indices[0]
+    targeted_top_class_name = tester.class_names.get(targeted_top_class_id, f"class_{targeted_top_class_id}")
+    targeted_top_probability = targeted_top_probs[0]
+    
+    # Perform test based on test_type
+    if test_type == 1:
+        success, results = tester.test_1_top_category_check(
+            untargeted_logits, targeted_logits, original_coarse_class
+        )
+    elif test_type == 2:
+        success, results = tester.test_2_coarse_score_check(
+            untargeted_logits, targeted_logits, original_coarse_class
+        )
+    else:
+        raise ValueError(f"Invalid test type: {test_type}")
+    
+    # Add prediction details to results
+    results["untargeted_prediction"] = {
+        "top_class_id": untargeted_top_class_id,
+        "top_class_name": untargeted_top_class_name,
+        "top_probability": untargeted_top_probability,
+        "top_5_classes": untargeted_top_indices[:5],
+        "top_5_probabilities": untargeted_top_probs[:5]
+    }
+    
+    results["targeted_prediction"] = {
+        "top_class_id": targeted_top_class_id,
+        "top_class_name": targeted_top_class_name,
+        "top_probability": targeted_top_probability,
+        "top_5_classes": targeted_top_indices[:5],
+        "top_5_probabilities": targeted_top_probs[:5]
+    }
+    
+    return success, results
+
+
 def main():
     """Main function to test adversarial attacks."""
 
@@ -404,17 +470,17 @@ def main():
         )
         print("  test_type: 1 or 2 (type of test to perform)")
         print("  original_image_path: Path to original image")
-        print("  untargeted_image: Untargeted adversarial image")
-        print("  targeted_image: Targeted adversarial image")
+        print("  untargeted_image_path: Path to untargeted adversarial image")
+        print("  targeted_image_path: Path to targeted adversarial image")
         print("  original_fine_class: ImageNet class ID (0-999)")
-        print("  original_coarse_class: Coarse class label or None")
+        print("  original_coarse_class: Coarse class label")
         print("  epsilon: Perturbation magnitude used")
         sys.exit(1)
 
     test_type = int(sys.argv[1])
     original_image_path = sys.argv[2]
-    untargeted_image = sys.argv[3]
-    targeted_image = sys.argv[4]
+    untargeted_image_path = sys.argv[3]
+    targeted_image_path = sys.argv[4]
     original_fine_class = int(sys.argv[5])
     original_coarse_class = str(sys.argv[6])
     epsilon = float(sys.argv[7])
@@ -435,6 +501,8 @@ def main():
         # Load images
         logger.info("Loading images...")
         original_image = load_image(original_image_path, tester.device)
+        untargeted_image = load_image(untargeted_image_path, tester.device)
+        targeted_image = load_image(targeted_image_path, tester.device)
 
         # Get ensemble logits
         logger.info("Computing ensemble logits...")
