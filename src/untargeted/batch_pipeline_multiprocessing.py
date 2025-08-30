@@ -8,7 +8,7 @@ using tensors internally and only saving files after successful tests.
 
 import logging
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 from multiprocessing import Pool, cpu_count
 
 import torch
@@ -18,7 +18,7 @@ from .simple_pipeline import run_complete_attack_pipeline
 logger = logging.getLogger(__name__)
 
 
-def _process_single_attack(args: Tuple[str, int, str, float, int, Path, str]) -> Tuple[bool, dict, str, dict]:
+def _process_single_attack(args: tuple[str, int, str, float, int, Path, str]) -> tuple[bool, dict, str, dict]:
     """
     Worker function for parallel processing of single attack.
     Returns (success, results, output_folder, metadata) where metadata contains input parameters.
@@ -45,7 +45,7 @@ def _process_single_attack(args: Tuple[str, int, str, float, int, Path, str]) ->
         return False, {"error": str(e)}, "", metadata
 
 
-def _process_image_all_combinations(args: Tuple[str, int, str, list, list, Path, str]) -> Tuple[bool, dict, str, list]:
+def _process_image_all_combinations(args: tuple[str, int, str, list, list, Path, str]) -> tuple[bool, dict, str, list]:
     """
     Worker function for parallel processing of a single image with all epsilon/test_type combinations.
     Returns (overall_success, overall_results, last_output_folder, metadata_list)
