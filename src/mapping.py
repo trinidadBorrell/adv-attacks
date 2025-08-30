@@ -4,10 +4,9 @@ Simple mapping utilities for ImageNet classes and coarse categories.
 """
 
 from pathlib import Path
-from typing import Dict, List
 
 
-def load_16_class_mapping() -> Dict[str, List[str]]:
+def load_16_class_mapping() -> dict[str, list[str]]:
     """Load the 16 coarse class to WNID mapping from file."""
     mapping_file = Path("imagenet_classes/16_class_mapping.txt")
     mapping = {}
@@ -48,7 +47,7 @@ def load_16_class_mapping() -> Dict[str, List[str]]:
     return mapping
 
 
-def load_wnid_to_imagenet_mapping() -> Dict[str, int]:
+def load_wnid_to_imagenet_mapping() -> dict[str, int]:
     """Load WNID to ImageNet class index mapping from synset_to_name.txt."""
     synset_file = Path("imagenet_classes/synset_to_name.txt")
     mapping = {}
@@ -63,7 +62,7 @@ def load_wnid_to_imagenet_mapping() -> Dict[str, int]:
     return mapping
 
 
-def get_coarse_to_imagenet_mapping() -> Dict[str, List[int]]:
+def get_coarse_to_imagenet_mapping() -> dict[str, list[int]]:
     """Get mapping from coarse categories to ImageNet class indices."""
     coarse_mapping = load_16_class_mapping()
     wnid_mapping = load_wnid_to_imagenet_mapping()

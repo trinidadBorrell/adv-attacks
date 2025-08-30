@@ -16,7 +16,7 @@ from typing import List
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 from src.mapping import get_representative_class_for_category
-from src.batch_pipeline_integration import run_batch_attacks
+from src.untargeted.batch_pipeline_multiprocessing import run_batch_attacks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

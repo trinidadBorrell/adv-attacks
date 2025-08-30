@@ -8,7 +8,7 @@ Runs validation -> generation -> testing -> save (only if successful)
 import logging
 import json
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 import numpy as np
@@ -37,7 +37,7 @@ def run_complete_attack_pipeline(
     test_type: int,
     output_dir: Path,
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-) -> Tuple[bool, dict[str, Any], str]:
+) -> tuple[bool, dict[str, Any], str]:
     """
     Run complete pipeline: validate -> generate -> test -> save (only if successful)
     """
