@@ -2,7 +2,7 @@
 """
 Adversarial Attack Generator using iFGSM
 
-Generates untargeted and targeted adversarial attacks following the paper:
+Generates targeted adversarial attack and control image following the paper:
 "Subtle adversarial image manipulations influence both human and machine perception"
 
 Usage:
@@ -11,11 +11,12 @@ Usage:
     image_path: Path to input image
     original_fine_class: ImageNet class ID (0-999)
     original_coarse_class: ImageNet coarse class label
+    target_coarse_class: ImageNet coarse class label
     epsilon: Perturbation magnitude (e.g., 8.0 for 8/255)
 
 Output:
-    - Untargeted adversarial image tensor: reduces confidence in original class
-    - Targeted adversarial image tensor: maximizes confidence in original class
+    - Targeted adversarial image tensor: maximizes confidence in target class
+    - Control image tensor: same magnitud of perturbation as targeted adversarial image
 """
 
 import logging
@@ -28,7 +29,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 # Import functions from utils module
-from ..utils import (
+from ...utils import (
     get_correct_coarse_mappings,
     get_ensemble_logits,
     get_normalize_transform,
@@ -65,43 +66,59 @@ class AdversarialGenerator:
 
         logger.info("Adversarial generator ready")
 
-    def generate_untargeted_attack(
-        self, image: torch.Tensor, original_class: int, epsilon: float
+    def generate_control_image_from_targeted_attack(
+        self, original_image: torch.Tensor, targeted_image: torch.Tensor, epsilon: float
     ) -> torch.Tensor:
         """
-        Generate untargeted attack to reduce confidence in original class.
+        Generate control image with same magnitude of perturbation as targeted adversarial image.
+        Reflects the perturbation (horizontal, vertical or diagonal) of the targeted image
+        and adds it to the original image.
 
-        Following paper: "the adversarial objective function corresponding to an
-        untargeted adversarial attack reducing the prediction confidence of class y
-        for input X is the binary cross entropy loss with label y_hat (aka, anything except y)"
+        Args:
+            original_image: Original clean image tensor
+            targeted_image: Adversarially perturbed image tensor
+            epsilon: Maximum perturbation magnitude
+
+        Returns:
+            Control image with reflected perturbation applied
         """
+        # Calculate the original perturbation
+        original_perturbation = targeted_image - original_image
 
-        # Prepare image for gradient computation
-        image_var = image.clone().detach().requires_grad_(True)
+        # Define flip operations and their names for clarity
+        flip_operations = {
+            "horizontal": (1, 2),
+            "vertical": (2, 3),
+            "diagonal": (1, 2, 3),
+        }
 
-        # Step 0: Get ensemble logits (normalize inside the gradient computation)
-        normalized_image = self.normalize(image_var)
-        ensemble_logits = get_ensemble_logits(normalized_image, self.models)
+        # Calculate MSE for each flip operation to find maximum difference
+        best_mse = -1
+        best_perturbation = None
 
-        # Step 1: Get probabilities from ensemble logits using softmax
-        probs = F.softmax(ensemble_logits, dim=1)  # Shape: [batch_size, num_classes]
+        for flip_name, dims in flip_operations.items():
+            flipped_perturbation = torch.flip(original_perturbation, dims)
+            mse = torch.nn.functional.mse_loss(
+                flipped_perturbation, original_perturbation
+            )
 
-        # Step 2: Get probability of the original predicted class (y)
-        prob_original_class = probs[0, original_class]  # P_ens(y|X)
+            if mse > best_mse:
+                best_mse = mse
+                best_perturbation = flipped_perturbation
 
-        # Step 3: Calculate probability of "not y" (ȳ) - all other classes combined
-        prob_not_original_class = 1 - prob_original_class  # P_ens(ȳ|X) = 1 - P_ens(y|X)
+        # Apply the best perturbation to the original image
+        control_image = original_image + best_perturbation
 
-        # Step 4: Calculate untargeted loss according to equation (3)
-        loss = -torch.log(prob_not_original_class)  # -log(P_ens(ȳ|X))
+        # Clamp to maintain epsilon constraint and valid pixel range
+        epsilon_normalized = epsilon / 255
+        control_image = torch.clamp(
+            control_image,
+            min=original_image - epsilon_normalized,
+            max=original_image + epsilon_normalized,
+        )
+        control_image = torch.clamp(control_image, min=0, max=1)
 
-        # Compute gradient
-        gradient = torch.autograd.grad(loss, image_var, retain_graph=False)[0]
-
-        # Apply iFGSM
-        adversarial_image = ifgsm_attack(image, epsilon, gradient)
-
-        return adversarial_image
+        return control_image
 
     def generate_targeted_attack(
         self, image: torch.Tensor, target_class: str, epsilon: float
@@ -153,20 +170,22 @@ def save_tensor_as_image(tensor: torch.Tensor, save_path: str):
 def main():
     """Main function following exact specifications."""
 
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 6:
         print(
-            "Usage: python gen.py <image_path> <original_fine_class> <original_coarse_class> <epsilon>"
+            "Usage: python gen.py <image_path> <original_fine_class> <original_coarse_class> <target_coarse_class> <epsilon>"
         )
         print("  image_path: Path to input image")
         print("  original_fine_class: ImageNet class ID (0-999)")
         print("  original_coarse_class: Coarse class label")
+        print("  target_coarse_class: Coarse class label")
         print("  epsilon: Perturbation magnitude (e.g., 8.0)")
         sys.exit(1)
 
     image_path = sys.argv[1]
     original_fine_class = int(sys.argv[2])
     original_coarse_class = str(sys.argv[3])
-    epsilon = float(sys.argv[4])
+    target_coarse_class = str(sys.argv[4])
+    epsilon = float(sys.argv[5])
 
     # Validate inputs
     if not (0 <= original_fine_class <= 999):
@@ -183,38 +202,31 @@ def main():
         logger.info(f"Loading image: {image_path}")
         image = generator.load_image(image_path)
 
-        # Generate untargeted attack
-        logger.info(
-            f"Generating untargeted attack (class {original_fine_class}, ε={epsilon})..."
-        )
-        untargeted_image = generator.generate_untargeted_attack(
-            image, original_fine_class, epsilon
-        )
-
         # Generate targeted attack (towards original class)
         logger.info(
             f"Generating targeted attack towards original class {original_coarse_class}..."
         )
 
         targeted_image = generator.generate_targeted_attack(
-            image, original_coarse_class, epsilon
+            image, target_coarse_class, epsilon
         )
 
-        # Calculate perturbation norms
-        untargeted_norm = torch.norm(untargeted_image - image, p=float("inf")).item()
-        targeted_norm = torch.norm(targeted_image - image, p=float("inf")).item()
+        # Generate control image (same magnitude of perturbation as targeted adversarial image)
+        logger.info(
+            "Generating control image with same magnitude of perturbation as targeted adversarial image..."
+        )
 
-        print("\nAttack generation completed!")
-        print(f"Untargeted perturbation L∞ norm: {untargeted_norm:.6f}")
-        print(f"Targeted perturbation L∞ norm: {targeted_norm:.6f}")
-        print("Returning adversarial image tensors (will save only if tests pass)")
+        control_image = generator.generate_control_image_from_targeted_attack(
+            image, targeted_image, epsilon
+        )
 
         # Return tensors for testing - will only be saved if tests pass
         return (
-            untargeted_image,
             targeted_image,
+            control_image,
             original_fine_class,
             original_coarse_class,
+            target_coarse_class,
         )
 
     except Exception as e:
