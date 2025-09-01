@@ -2,21 +2,22 @@
 """
 Adversarial Attack Generator using iFGSM
 
-Generates targeted adversarial attack and control image following the paper:
+Generates targeted adversarial attack 1 and 2 following the paper:
 "Subtle adversarial image manipulations influence both human and machine perception"
 
 Usage:
-    python gen.py <image_path> <original_fine_class> <original_coarse_class> <epsilon>
+    python gen.py <image_path> <original_fine_class> <original_coarse_class> <target_coarse_class 1> <target_coarse_class 2> <epsilon>
 
     image_path: Path to input image
     original_fine_class: ImageNet class ID (0-999)
     original_coarse_class: ImageNet coarse class label
-    target_coarse_class: ImageNet coarse class label
+    target_coarse_class 1: ImageNet coarse class label
+    target_coarse_class 2: ImageNet coarse class label
     epsilon: Perturbation magnitude (e.g., 8.0 for 8/255)
 
 Output:
-    - Targeted adversarial image tensor: maximizes confidence in target class
-    - Control image tensor: same magnitud of perturbation as targeted adversarial image
+    - Targeted adversarial image tensor 1: maximizes confidence in target class 1
+    - Targeted adversarial image tensor 2: maximizes confidence in target class 2
 """
 
 import logging
@@ -65,60 +66,6 @@ class AdversarialGenerator:
         self.coarse_labels, self.coarse_indices = get_correct_coarse_mappings()
 
         logger.info("Adversarial generator ready")
-
-    def generate_control_image_from_targeted_attack(
-        self, original_image: torch.Tensor, targeted_image: torch.Tensor, epsilon: float
-    ) -> torch.Tensor:
-        """
-        Generate control image with same magnitude of perturbation as targeted adversarial image.
-        Reflects the perturbation (horizontal, vertical or diagonal) of the targeted image
-        and adds it to the original image.
-
-        Args:
-            original_image: Original clean image tensor
-            targeted_image: Adversarially perturbed image tensor
-            epsilon: Maximum perturbation magnitude
-
-        Returns:
-            Control image with reflected perturbation applied
-        """
-        # Calculate the original perturbation
-        original_perturbation = targeted_image - original_image
-
-        # Define flip operations and their names for clarity
-        flip_operations = {
-            "horizontal": (1, 2),
-            "vertical": (2, 3),
-            "diagonal": (1, 2, 3),
-        }
-
-        # Calculate MSE for each flip operation to find maximum difference
-        best_mse = -1
-        best_perturbation = None
-
-        for flip_name, dims in flip_operations.items():
-            flipped_perturbation = torch.flip(original_perturbation, dims)
-            mse = torch.nn.functional.mse_loss(
-                flipped_perturbation, original_perturbation
-            )
-
-            if mse > best_mse:
-                best_mse = mse
-                best_perturbation = flipped_perturbation
-
-        # Apply the best perturbation to the original image
-        control_image = original_image + best_perturbation
-
-        # Clamp to maintain epsilon constraint and valid pixel range
-        epsilon_normalized = epsilon / 255
-        control_image = torch.clamp(
-            control_image,
-            min=original_image - epsilon_normalized,
-            max=original_image + epsilon_normalized,
-        )
-        control_image = torch.clamp(control_image, min=0, max=1)
-
-        return control_image
 
     def generate_targeted_attack(
         self, image: torch.Tensor, target_class: str, epsilon: float
@@ -170,22 +117,24 @@ def save_tensor_as_image(tensor: torch.Tensor, save_path: str):
 def main():
     """Main function following exact specifications."""
 
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         print(
-            "Usage: python gen.py <image_path> <original_fine_class> <original_coarse_class> <target_coarse_class> <epsilon>"
+            "Usage: python gen.py <image_path> <original_fine_class> <original_coarse_class> <target_coarse_class 1> <target_coarse_class 2> <epsilon>"
         )
         print("  image_path: Path to input image")
         print("  original_fine_class: ImageNet class ID (0-999)")
         print("  original_coarse_class: Coarse class label")
-        print("  target_coarse_class: Coarse class label")
+        print("  target_coarse_class 1: Coarse class label")
+        print("  target_coarse_class 2: Coarse class label")
         print("  epsilon: Perturbation magnitude (e.g., 8.0)")
         sys.exit(1)
 
     image_path = sys.argv[1]
     original_fine_class = int(sys.argv[2])
     original_coarse_class = str(sys.argv[3])
-    target_coarse_class = str(sys.argv[4])
-    epsilon = float(sys.argv[5])
+    target_coarse_class_1 = str(sys.argv[4])
+    target_coarse_class_2 = str(sys.argv[5])
+    epsilon = float(sys.argv[6])
 
     # Validate inputs
     if not (0 <= original_fine_class <= 999):
@@ -203,28 +152,27 @@ def main():
         image = generator.load_image(image_path)
 
         # Generate targeted attack (towards original class)
-        logger.info(f"Generating targeted attack towards {target_coarse_class}...")
+        logger.info(f"Generating targeted attack towards {target_coarse_class_1}...")
 
-        targeted_image = generator.generate_targeted_attack(
-            image, target_coarse_class, epsilon
+        targeted_image_1 = generator.generate_targeted_attack(
+            image, target_coarse_class_1, epsilon
         )
 
         # Generate control image (same magnitude of perturbation as targeted adversarial image)
-        logger.info(
-            "Generating control image with same magnitude of perturbation as targeted adversarial image..."
-        )
+        logger.info("Generating targeted attack towards {target_coarse_class_2}...")
 
-        control_image = generator.generate_control_image_from_targeted_attack(
-            image, targeted_image, epsilon
+        targeted_image_2 = generator.generate_targeted_attack(
+            image, target_coarse_class_2, epsilon
         )
 
         # Return tensors for testing - will only be saved if tests pass
         return (
-            targeted_image,
-            control_image,
+            targeted_image_1,
+            targeted_image_2,
             original_fine_class,
             original_coarse_class,
-            target_coarse_class,
+            target_coarse_class_1,
+            target_coarse_class_2,
         )
 
     except Exception as e:
