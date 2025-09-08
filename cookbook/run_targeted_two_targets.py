@@ -3,7 +3,14 @@
 Clean Untargeted Attack Pipeline
 
 Usage:
-    python run_targeted.py <epsilons> <categories> [imagenet_folder] <test_type> <output>
+    python run_targeted_two_targets.py <epsilons> <categories1> <categories2> [imagenet_folder] <test_type> <output>
+    epsilons: Comma-separated epsilon values (e.g., '8.0,16.0')
+    categories1: First category to target
+    categories2: Second category to target
+    the pair of categories will be considered sequentially (categories1[0], categories2[0]), (categories1[1], categories2[1]), ...
+    imagenet_folder: Path to ImageNet folder
+    test_type: Test type (1 or 2)
+    output: Output directory
 """
 
 import argparse
@@ -15,7 +22,7 @@ from typing import List
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
-from src.targeted.one_targets.batch_pipeline_multiprocessing import run_batch_attacks
+from src.targeted.two_targets.batch_pipeline_multiprocessing import run_batch_attacks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,7 +51,10 @@ def main():
         "epsilons", help="Comma-separated epsilon values (e.g., '8.0,16.0')"
     )
     parser.add_argument(
-        "categories", help="Comma-separated categories (e.g., 'cat,dog')"
+        "categories1", help="Comma-separated categories (e.g., 'cat,dog')"
+    )
+    parser.add_argument(
+        "categories2", help="Comma-separated categories (e.g., 'cat,dog')"
     )
     parser.add_argument("imagenet_folder", help="Path to ImageNet folder")
     parser.add_argument(
@@ -68,7 +78,10 @@ def main():
 
     # Parse arguments
     epsilons = [float(eps.strip()) for eps in args.epsilons.split(",")]
-    categories = [cat.strip() for cat in args.categories.split(",")]
+    # generate a list of pairs of categories
+    categories = [
+        (x, y) for x, y in zip(args.categories1.split(","), args.categories2.split(","))
+    ]
 
     # Change to project root
     project_root = Path(__file__).parent.parent
@@ -129,19 +142,19 @@ def main():
         "category_results": {},
     }
 
-    for category in categories:
+    for category1, category2 in categories:
         image_paths = images
 
         logger.info(
-            f"Target: {args.target_successes} successful attacks for {category}"
+            f"Target: {args.target_successes} successful attacks for {category1}, {category2}"
         )
 
-        category_successes = 0
+        categories_successes = 0
         processed_images = 0
         batch_start_idx = 0
 
         # Process images in batches until we reach target successes or run out of images
-        while category_successes < args.target_successes and batch_start_idx < len(
+        while categories_successes < args.target_successes and batch_start_idx < len(
             image_paths
         ):
             # Determine batch size for this iteration
@@ -153,10 +166,11 @@ def main():
                 batch_start_idx : batch_start_idx + current_batch_size
             ]
             batch_fine_class_ids = [-1] * len(batch_image_paths)
-            batch_target_coarse_classes = [category] * len(batch_image_paths)
+            batch_target_coarse_classes_1 = [category1] * len(batch_image_paths)
+            batch_target_coarse_classes_2 = [category2] * len(batch_image_paths)
 
             logger.info(
-                f"Processing batch of {len(batch_image_paths)} images for {category} "
+                f"Processing batch of {len(batch_image_paths)} images for {category1}, {category2} "
                 f"(images {batch_start_idx + 1}-{batch_start_idx + len(batch_image_paths)} of {len(image_paths)})"
             )
 
@@ -164,7 +178,8 @@ def main():
             batch_results = run_batch_attacks(
                 image_paths=batch_image_paths,
                 fine_class_ids=batch_fine_class_ids,
-                targeted_coarse_classes=batch_target_coarse_classes,
+                targeted_coarse_classes_1=batch_target_coarse_classes_1,
+                targeted_coarse_classes_2=batch_target_coarse_classes_2,
                 epsilons=epsilons,
                 test_types=[args.test_type],
                 output_base_dir=output_dir,
@@ -173,7 +188,7 @@ def main():
 
             # Update counters
             batch_successes = batch_results["successful_attacks"]
-            category_successes += batch_successes
+            categories_successes += batch_successes
             processed_images += len(batch_image_paths)
 
             # Update overall summary
@@ -188,34 +203,34 @@ def main():
 
             logger.info(
                 f"Batch complete: {batch_successes} successes. "
-                f"Category total: {category_successes}/{args.target_successes}"
+                f"Category total: {categories_successes}/{args.target_successes}"
             )
 
             # Move to next batch
             batch_start_idx += current_batch_size
 
             # Check if we've reached our target
-            if category_successes >= args.target_successes:
+            if categories_successes >= args.target_successes:
                 logger.info(
-                    f"✅ Target reached for {category}: {category_successes} successful attacks"
+                    f"✅ Target reached for {category1}, {category2}: {categories_successes} successful attacks"
                 )
                 break
 
         # Store category results
-        overall_summary["category_results"][category] = {
+        overall_summary["category_results"][f"{category1}-{category2}"] = {
             "target": args.target_successes,
-            "achieved": category_successes,
+            "achieved": categories_successes,
             "processed_images": processed_images,
             "total_available": len(image_paths),
-            "success_rate": (category_successes / processed_images * 100)
+            "success_rate": (categories_successes / processed_images * 100)
             if processed_images > 0
             else 0,
         }
 
-        if category_successes < args.target_successes:
+        if categories_successes < args.target_successes:
             logger.warning(
-                f"⚠️  Could not reach target for {category}: "
-                f"{category_successes}/{args.target_successes} successful attacks "
+                f"⚠️  Could not reach target for {category1}, {category2}: "
+                f"{categories_successes}/{args.target_successes} successful attacks "
                 f"(processed all {len(image_paths)} available images)"
             )
 
