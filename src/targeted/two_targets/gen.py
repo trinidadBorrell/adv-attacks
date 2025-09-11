@@ -67,11 +67,76 @@ class AdversarialGenerator:
 
         logger.info("Adversarial generator ready")
 
+    def generate_targeted_attacks_top3(
+        self, image: torch.Tensor, target_class: str, epsilon: float
+    ) -> list[torch.Tensor]:
+        """
+        Generate 3 targeted attacks using the top 3 categories within the target coarse class.
+        This should improve attack success rates by focusing on higher-probability categories.
+
+        Returns:
+            List of 3 adversarial images, each targeting a different top category
+        """
+        # Prepare image for gradient computation
+        image_var = image.clone().detach().requires_grad_(True)
+        normalized_image = self.normalize(image_var)
+
+        # Step 0: Get ensemble logits
+        ensemble_logits = get_ensemble_logits(normalized_image, self.models)
+
+        # Step 1: Get probabilities from ensemble logits using softmax (P_ens(y|X))
+        probs = F.softmax(ensemble_logits, dim=1)  # Shape: [batch_size, num_classes]
+
+        # Step 2: Get coarse indices of target class
+        coarse_indices = self.coarse_indices[self.coarse_labels.index(target_class)]
+
+        # Step 3: Get probabilities for categories within target coarse class
+        coarse_probs = probs[0, coarse_indices]
+
+        # Step 4: Find top 3 categories within the coarse class
+        top3_values, top3_local_indices = torch.topk(
+            coarse_probs, min(3, len(coarse_probs))
+        )
+
+        # Convert local indices to global indices
+        top3_global_indices = [coarse_indices[idx] for idx in top3_local_indices]
+
+        logger.info(
+            f"Top 3 categories in {target_class}: {top3_global_indices} with probs {top3_values.tolist()}"
+        )
+
+        adversarial_images = []
+
+        # Step 5: Generate adversarial image for each of the top 3 categories
+        for i, target_idx in enumerate(top3_global_indices):
+            # Fresh image variable for each gradient computation
+            image_var = image.clone().detach().requires_grad_(True)
+            normalized_image = self.normalize(image_var)
+
+            # Get ensemble logits for this image
+            ensemble_logits = get_ensemble_logits(normalized_image, self.models)
+            probs = F.softmax(ensemble_logits, dim=1)
+
+            # Loss targeting specific category
+            loss = -torch.log(probs[0, target_idx])
+            gradient = torch.autograd.grad(loss, image_var)[0]
+
+            # Apply iFGSM
+            adversarial_image = ifgsm_attack(image, epsilon, gradient)
+            adversarial_images.append(adversarial_image)
+
+            logger.info(
+                f"Generated adversarial image {i + 1}/3 targeting category {target_idx}"
+            )
+
+        return adversarial_images
+
     def generate_targeted_attack(
         self, image: torch.Tensor, target_class: str, epsilon: float
     ) -> torch.Tensor:
         """
         Generate targeted attack to maximize confidence in target coarse class.
+        Legacy method - kept for backward compatibility.
         """
 
         # Prepare image for gradient computation
@@ -151,24 +216,24 @@ def main():
         logger.info(f"Loading image: {image_path}")
         image = generator.load_image(image_path)
 
-        # Generate targeted attack (towards original class)
-        logger.info(f"Generating targeted attack towards {target_coarse_class_1}...")
+        # Generate 3 targeted attacks for first target using top 3 categories
+        logger.info(f"Generating 3 targeted attacks towards {target_coarse_class_1}...")
 
-        targeted_image_1 = generator.generate_targeted_attack(
+        targeted_images_1 = generator.generate_targeted_attacks_top3(
             image, target_coarse_class_1, epsilon
         )
 
-        # Generate control image (same magnitude of perturbation as targeted adversarial image)
-        logger.info("Generating targeted attack towards {target_coarse_class_2}...")
+        # Generate 3 targeted attacks for second target using top 3 categories
+        logger.info(f"Generating 3 targeted attacks towards {target_coarse_class_2}...")
 
-        targeted_image_2 = generator.generate_targeted_attack(
+        targeted_images_2 = generator.generate_targeted_attacks_top3(
             image, target_coarse_class_2, epsilon
         )
 
         # Return tensors for testing - will only be saved if tests pass
         return (
-            targeted_image_1,
-            targeted_image_2,
+            targeted_images_1,
+            targeted_images_2,
             original_fine_class,
             original_coarse_class,
             target_coarse_class_1,

@@ -407,6 +407,132 @@ class AdversarialTester:
         Image.fromarray(image_np).save(path)
 
 
+def test_adversarial_tensors_multiple(
+    test_type: int,
+    targeted_images_1: list[torch.Tensor],
+    targeted_images_2: list[torch.Tensor],
+    targeted_coarse_class_1: str,
+    targeted_coarse_class_2: str,
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+) -> tuple[bool, dict[str, Any]]:
+    """Test multiple adversarial attack tensors and pass if any combination succeeds."""
+
+    # Initialize tester
+    tester = AdversarialTester(device)
+
+    logger.info(
+        f"Testing {len(targeted_images_1)}x{len(targeted_images_2)} adversarial image combinations..."
+    )
+
+    best_success = False
+    best_results = None
+    successful_combinations = []
+
+    # Test each combination of adversarial image variants
+    for i, targeted_image_1 in enumerate(targeted_images_1):
+        for j, targeted_image_2 in enumerate(targeted_images_2):
+            logger.info(
+                f"Testing combination ({i + 1},{j + 1})/{len(targeted_images_1) * len(targeted_images_2)}..."
+            )
+
+            # Get ensemble logits
+            targeted_logits_1 = get_ensemble_logits(
+                tester.normalize(targeted_image_1), tester.models
+            )
+            targeted_logits_2 = get_ensemble_logits(
+                tester.normalize(targeted_image_2), tester.models
+            )
+
+            # Get prediction details for metadata
+            targeted_top_indices_1, targeted_top_probs_1 = tester.get_top_predictions(
+                targeted_logits_1, top_k=5
+            )
+            targeted_top_indices_2, targeted_top_probs_2 = tester.get_top_predictions(
+                targeted_logits_2, top_k=5
+            )
+
+            targeted_top_class_id_1 = targeted_top_indices_1[0]
+            targeted_top_class_name_1 = tester.class_names.get(
+                targeted_top_class_id_1, f"class_{targeted_top_class_id_1}"
+            )
+            targeted_top_probability_1 = targeted_top_probs_1[0]
+
+            targeted_top_class_id_2 = targeted_top_indices_2[0]
+            targeted_top_class_name_2 = tester.class_names.get(
+                targeted_top_class_id_2, f"class_{targeted_top_class_id_2}"
+            )
+            targeted_top_probability_2 = targeted_top_probs_2[0]
+
+            # Perform test based on test_type
+            if test_type == 1:
+                success, results = tester.test_1_top_category_check(
+                    targeted_logits_1,
+                    targeted_logits_2,
+                    targeted_coarse_class_1,
+                    targeted_coarse_class_2,
+                )
+            elif test_type == 2:
+                success, results = tester.test_2_coarse_score_check(
+                    targeted_logits_1,
+                    targeted_logits_2,
+                    targeted_coarse_class_1,
+                    targeted_coarse_class_2,
+                )
+            else:
+                raise ValueError(f"Invalid test type: {test_type}")
+
+            # Add prediction details to results
+            results["targeted_prediction_1"] = {
+                "top_class_id": targeted_top_class_id_1,
+                "top_class_name": targeted_top_class_name_1,
+                "top_probability": targeted_top_probability_1,
+                "top_5_classes": targeted_top_indices_1[:5],
+                "top_5_probabilities": targeted_top_probs_1[:5],
+            }
+
+            results["targeted_prediction_2"] = {
+                "top_class_id": targeted_top_class_id_2,
+                "top_class_name": targeted_top_class_name_2,
+                "top_probability": targeted_top_probability_2,
+                "top_5_classes": targeted_top_indices_2[:5],
+                "top_5_probabilities": targeted_top_probs_2[:5],
+            }
+
+            results["variant_indices"] = (i, j)
+
+            logger.info(f"Combination ({i + 1},{j + 1}) success: {success}")
+
+            if success:
+                successful_combinations.append((i, j))
+                if not best_success:  # Use first successful combination as best
+                    best_success = True
+                    best_results = results
+                    best_results["successful_combination_used"] = (i, j)
+                    best_results["targeted_image_1_used"] = targeted_image_1
+                    best_results["targeted_image_2_used"] = targeted_image_2
+
+    # If any combination succeeded, return success with the first successful combination's results
+    if best_success:
+        best_results["total_combinations_tested"] = len(targeted_images_1) * len(
+            targeted_images_2
+        )
+        best_results["successful_combinations"] = successful_combinations
+        logger.info(
+            f"SUCCESS: {len(successful_combinations)}/{len(targeted_images_1) * len(targeted_images_2)} combinations passed the test"
+        )
+        return True, best_results
+    else:
+        # If none succeeded, return the last combination's results
+        results["total_combinations_tested"] = len(targeted_images_1) * len(
+            targeted_images_2
+        )
+        results["successful_combinations"] = []
+        logger.info(
+            f"FAILURE: 0/{len(targeted_images_1) * len(targeted_images_2)} combinations passed the test"
+        )
+        return False, results
+
+
 def test_adversarial_tensors(
     test_type: int,
     targeted_image_1: torch.Tensor,
@@ -415,7 +541,7 @@ def test_adversarial_tensors(
     targeted_coarse_class_2: str,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> tuple[bool, dict[str, Any]]:
-    """Test adversarial attack tensors directly without file I/O."""
+    """Test adversarial attack tensors directly without file I/O. Legacy method for single images."""
 
     # Initialize tester
     tester = AdversarialTester(device)
@@ -562,13 +688,34 @@ def main():
 
         # Save results if successful
         if success:
+            # Check if we have multiple combinations (new method) or single combination (legacy)
+            if (
+                "targeted_image_1_used" in results
+                and "targeted_image_2_used" in results
+            ):
+                # Multiple combinations case - use the successful combination
+                targeted_image_1_to_save = results["targeted_image_1_used"]
+                targeted_image_2_to_save = results["targeted_image_2_used"]
+                targeted_logits_1_to_save = get_ensemble_logits(
+                    tester.normalize(targeted_image_1_to_save), tester.models
+                )
+                targeted_logits_2_to_save = get_ensemble_logits(
+                    tester.normalize(targeted_image_2_to_save), tester.models
+                )
+            else:
+                # Legacy single combination case
+                targeted_image_1_to_save = targeted_image_1
+                targeted_image_2_to_save = targeted_image_2
+                targeted_logits_1_to_save = targeted_logits_1
+                targeted_logits_2_to_save = targeted_logits_2
+
             output_folder = tester.save_successful_results(
                 test_type,
                 original_image,
-                targeted_image_1,
-                targeted_image_2,
-                targeted_logits_1,
-                targeted_logits_2,
+                targeted_image_1_to_save,
+                targeted_image_2_to_save,
+                targeted_logits_1_to_save,
+                targeted_logits_2_to_save,
                 results,
                 original_image_path,
                 epsilon,
