@@ -7,11 +7,14 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Set
+
+import numpy as np
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -36,6 +39,40 @@ def find_images(folder_path: str) -> List[str]:
                 image_paths.append(str(Path(root) / file))
 
     return image_paths
+
+
+def load_used_images(output_dir: Path) -> Set[str]:
+    """Load the set of already used image paths."""
+    used_images_file = output_dir / "used_images_one_target.json"
+    if used_images_file.exists():
+        try:
+            with open(used_images_file, "r") as f:
+                used_images_list = json.load(f)
+                return set(used_images_list)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not load used images file: {e}")
+            return set()
+    return set()
+
+
+def save_used_images(used_images: Set[str], output_dir: Path) -> None:
+    """Save the set of used image paths to disk."""
+    used_images_file = output_dir / "used_images_one_target.json"
+    try:
+        with open(used_images_file, "w") as f:
+            json.dump(list(used_images), f, indent=2)
+        logger.info(f"Saved {len(used_images)} used image paths to {used_images_file}")
+    except IOError as e:
+        logger.error(f"Could not save used images file: {e}")
+
+
+def filter_unused_images(all_images: List[str], used_images: Set[str]) -> List[str]:
+    """Filter out already used images from the list."""
+    unused_images = [img for img in all_images if img not in used_images]
+    logger.info(
+        f"Filtered images: {len(all_images)} total, {len(used_images)} used, {len(unused_images)} available"
+    )
+    return unused_images
 
 
 def main():
@@ -104,10 +141,16 @@ def main():
             images.extend([str(img) for img in synset_images])
 
     logger.info(f"Total images: {len(images)}")
+    # randomly shuffle images
+    np.random.shuffle(images)
 
     # Create output directory
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load used images and filter out already processed ones
+    used_images = load_used_images(output_dir)
+    images = filter_unused_images(images, used_images)
 
     # Run pipeline
     logger.info("Starting attack pipeline...")
@@ -128,6 +171,9 @@ def main():
         "successful_results": [],
         "category_results": {},
     }
+
+    # Track total iterations for periodic saving
+    total_iterations = 0
 
     for category in categories:
         image_paths = images
@@ -176,6 +222,10 @@ def main():
             category_successes += batch_successes
             processed_images += len(batch_image_paths)
 
+            # Add processed images to used_images set
+            for img_path in batch_image_paths:
+                used_images.add(img_path)
+
             # Update overall summary
             overall_summary["total_images"] += batch_results["total_images"]
             overall_summary["total_tasks"] += batch_results["total_tasks"]
@@ -185,6 +235,14 @@ def main():
             overall_summary["successful_results"].extend(
                 batch_results["successful_results"]
             )
+
+            # Increment total iterations and save used images every 10 iterations
+            total_iterations += 1
+            if total_iterations % 10 == 0:
+                save_used_images(used_images, output_dir)
+                logger.info(
+                    f"Checkpoint: Saved used images list at iteration {total_iterations}"
+                )
 
             logger.info(
                 f"Batch complete: {batch_successes} successes. "
@@ -226,6 +284,9 @@ def main():
         ) / overall_summary["total_tasks"]
 
     results_summary = overall_summary
+
+    # Final save of used images
+    save_used_images(used_images, output_dir)
 
     # Summary
     logger.info("=== SUMMARY ===")
