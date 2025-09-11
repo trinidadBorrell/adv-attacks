@@ -395,6 +395,116 @@ class AdversarialTester:
         Image.fromarray(image_np).save(path)
 
 
+def test_adversarial_tensors_multiple(
+    test_type: int,
+    targeted_images: list[torch.Tensor],
+    control_images: list[torch.Tensor],
+    targeted_coarse_class: str,
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+) -> tuple[bool, dict[str, Any]]:
+    """Test multiple adversarial attack tensors and pass if any succeeds."""
+
+    # Initialize tester
+    tester = AdversarialTester(device)
+
+    logger.info(f"Testing {len(targeted_images)} adversarial image variants...")
+
+    best_success = False
+    best_results = None
+    successful_variants = []
+
+    # Test each adversarial image variant
+    for i, (targeted_image, control_image) in enumerate(
+        zip(targeted_images, control_images)
+    ):
+        logger.info(f"Testing variant {i + 1}/{len(targeted_images)}...")
+
+        # Get ensemble logits
+        targeted_logits = get_ensemble_logits(
+            tester.normalize(targeted_image), tester.models
+        )
+        control_logits = get_ensemble_logits(
+            tester.normalize(control_image), tester.models
+        )
+
+        # Get prediction details for metadata
+        targeted_top_indices, targeted_top_probs = tester.get_top_predictions(
+            targeted_logits, top_k=5
+        )
+        control_top_indices, control_top_probs = tester.get_top_predictions(
+            control_logits, top_k=5
+        )
+
+        targeted_top_class_id = targeted_top_indices[0]
+        targeted_top_class_name = tester.class_names.get(
+            targeted_top_class_id, f"class_{targeted_top_class_id}"
+        )
+        targeted_top_probability = targeted_top_probs[0]
+
+        control_top_class_id = control_top_indices[0]
+        control_top_class_name = tester.class_names.get(
+            control_top_class_id, f"class_{control_top_class_id}"
+        )
+        control_top_probability = control_top_probs[0]
+
+        # Perform test based on test_type
+        if test_type == 1:
+            success, results = tester.test_1_top_category_check(
+                targeted_logits, control_logits, targeted_coarse_class
+            )
+        elif test_type == 2:
+            success, results = tester.test_2_coarse_score_check(
+                targeted_logits, control_logits, targeted_coarse_class
+            )
+        else:
+            raise ValueError(f"Invalid test type: {test_type}")
+
+        # Add prediction details to results
+        results["control_prediction"] = {
+            "top_class_id": control_top_class_id,
+            "top_class_name": control_top_class_name,
+            "top_probability": control_top_probability,
+            "top_5_classes": control_top_indices[:5],
+            "top_5_probabilities": control_top_probs[:5],
+        }
+
+        results["targeted_prediction"] = {
+            "top_class_id": targeted_top_class_id,
+            "top_class_name": targeted_top_class_name,
+            "top_probability": targeted_top_probability,
+            "top_5_classes": targeted_top_indices[:5],
+            "top_5_probabilities": targeted_top_probs[:5],
+        }
+
+        results["variant_index"] = i
+
+        logger.info(f"Variant {i + 1} success: {success}")
+
+        if success:
+            successful_variants.append(i)
+            if not best_success:  # Use first successful variant as best
+                best_success = True
+                best_results = results
+                best_results["successful_variant_used"] = i
+                best_results["targeted_image_used"] = targeted_image
+                best_results["control_image_used"] = control_image
+
+    # If any variant succeeded, return success with the first successful variant's results
+    if best_success:
+        best_results["total_variants_tested"] = len(targeted_images)
+        best_results["successful_variants"] = successful_variants
+        logger.info(
+            f"SUCCESS: {len(successful_variants)}/{len(targeted_images)} variants passed the test"
+        )
+        return True, best_results
+    else:
+        # If none succeeded, return the last variant's results
+        results["total_variants_tested"] = len(targeted_images)
+        results["successful_variants"] = []
+        logger.info(f"FAILURE: 0/{len(targeted_images)} variants passed the test")
+        return False, results
+
+
 def test_adversarial_tensors(
     test_type: int,
     targeted_image: torch.Tensor,
@@ -402,7 +512,7 @@ def test_adversarial_tensors(
     targeted_coarse_class: str,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> tuple[bool, dict[str, Any]]:
-    """Test adversarial attack tensors directly without file I/O."""
+    """Test adversarial attack tensors directly without file I/O. Legacy method for single image."""
 
     # Initialize tester
     tester = AdversarialTester(device)
@@ -533,13 +643,31 @@ def main():
 
         # Save results if successful
         if success:
+            # Check if we have multiple variants (new method) or single variant (legacy)
+            if "targeted_image_used" in results and "control_image_used" in results:
+                # Multiple variants case - use the successful variant
+                targeted_image_to_save = results["targeted_image_used"]
+                control_image_to_save = results["control_image_used"]
+                targeted_logits_to_save = get_ensemble_logits(
+                    tester.normalize(targeted_image_to_save), tester.models
+                )
+                control_logits_to_save = get_ensemble_logits(
+                    tester.normalize(control_image_to_save), tester.models
+                )
+            else:
+                # Legacy single variant case
+                targeted_image_to_save = targeted_image
+                control_image_to_save = control_image
+                targeted_logits_to_save = targeted_logits
+                control_logits_to_save = control_logits
+
             output_folder = tester.save_successful_results(
                 test_type,
                 original_image,
-                targeted_image,
-                control_image,
-                targeted_logits,
-                control_logits,
+                targeted_image_to_save,
+                control_image_to_save,
+                targeted_logits_to_save,
+                control_logits_to_save,
                 results,
                 original_image_path,
                 epsilon,

@@ -16,7 +16,7 @@ from PIL import Image
 
 from ...utils import load_image
 from .gen import AdversarialGenerator
-from .test import test_adversarial_tensors
+from .test import test_adversarial_tensors_multiple
 from .val import ImageValidator
 
 logger = logging.getLogger(__name__)
@@ -51,20 +51,24 @@ def run_complete_attack_pipeline(
     if not val_success:
         return False, val_results, ""
 
-    # Step 2: Generate attacks
+    # Step 2: Generate attacks (3 variants using top 3 categories)
     generator = AdversarialGenerator(device)
     original_image = load_image(image_path, device)
 
-    targeted_image = generator.generate_targeted_attack(
+    targeted_images = generator.generate_targeted_attacks_top3(
         original_image, targeted_coarse_class, epsilon
     )
-    control_image = generator.generate_control_image_from_targeted_attack(
-        original_image, targeted_image, epsilon
-    )
 
-    # Step 3: Test attacks
-    test_success, test_results = test_adversarial_tensors(
-        test_type, targeted_image, control_image, targeted_coarse_class, device
+    control_images = []
+    for targeted_image in targeted_images:
+        control_image = generator.generate_control_image_from_targeted_attack(
+            original_image, targeted_image, epsilon
+        )
+        control_images.append(control_image)
+
+    # Step 3: Test attacks (any successful variant passes)
+    test_success, test_results = test_adversarial_tensors_multiple(
+        test_type, targeted_images, control_images, targeted_coarse_class, device
     )
 
     if not test_success:
@@ -75,10 +79,32 @@ def run_complete_attack_pipeline(
     attack_folder = output_dir / f"{image_name}_eps{epsilon}_test{test_type}"
     attack_folder.mkdir(parents=True, exist_ok=True)
 
-    # Save images
+    # Save images (save the successful variant)
     save_tensor_as_image(original_image, str(attack_folder / "original.png"))
-    save_tensor_as_image(control_image, str(attack_folder / "control.png"))
-    save_tensor_as_image(targeted_image, str(attack_folder / "targeted.png"))
+
+    if "targeted_image_used" in test_results and "control_image_used" in test_results:
+        # Save the successful variant
+        save_tensor_as_image(
+            test_results["targeted_image_used"], str(attack_folder / "targeted.png")
+        )
+        save_tensor_as_image(
+            test_results["control_image_used"], str(attack_folder / "control.png")
+        )
+
+        # Also save all variants for analysis
+        for i, (targeted_img, control_img) in enumerate(
+            zip(targeted_images, control_images)
+        ):
+            save_tensor_as_image(
+                targeted_img, str(attack_folder / f"targeted_variant_{i}.png")
+            )
+            save_tensor_as_image(
+                control_img, str(attack_folder / f"control_variant_{i}.png")
+            )
+    else:
+        # Fallback for legacy results
+        save_tensor_as_image(targeted_images[0], str(attack_folder / "targeted.png"))
+        save_tensor_as_image(control_images[0], str(attack_folder / "control.png"))
 
     # Save metadata
     metadata = {
