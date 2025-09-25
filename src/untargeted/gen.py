@@ -93,7 +93,7 @@ class AdversarialGenerator:
         prob_not_original_class = 1 - prob_original_class  # P_ens(ȳ|X) = 1 - P_ens(y|X)
 
         # Step 4: Calculate untargeted loss according to equation (3)
-        loss = -torch.log(prob_not_original_class)  # -log(P_ens(ȳ|X))
+        loss = torch.log(prob_not_original_class)  # -log(P_ens(ȳ|X))
 
         # Compute gradient
         gradient = torch.autograd.grad(loss, image_var, retain_graph=False)[0]
@@ -124,7 +124,7 @@ class AdversarialGenerator:
         coarse_indices = self.coarse_indices[self.coarse_labels.index(target_class)]
 
         # Step 3: Sum the actual gradients, then take the sign
-        loss = -torch.log(
+        loss = torch.log(
             probs[0, coarse_indices].sum()
         )  # Total coarse class probability
         gradient = torch.autograd.grad(loss, image_var)[0]

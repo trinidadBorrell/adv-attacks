@@ -155,7 +155,8 @@ class AdversarialTester:
         }
 
         logger.info(
-            f"Test 1 Results: Overall={overall_success}, Targeted={targeted_success}, Control={control_success}"
+            f"Test 1 Results: Overall={overall_success}, Targeted={targeted_success}, Control={control_success}. Targeted top prediction: {self.class_names.get(targeted_top_prediction, f'class_{targeted_top_prediction}')}, Control top prediction: {self.class_names.get(control_top_prediction, f'class_{control_top_prediction}')}"
+            f"\nTarget top probs: {targeted_top_probs[:3]}, Control top probs: {control_top_probs[:3]}"
         )
 
         return overall_success, results
@@ -227,7 +228,8 @@ class AdversarialTester:
         }
 
         logger.info(
-            f"Test 2 Results: Overall={overall_success}, Targeted={targeted_success}, Control={control_success}"
+            f"Test 2 Results: Overall={overall_success}, Targeted={targeted_success}, Control={control_success}. Targeted top prediction: {self.class_names.get(targeted_top_prediction, f'class_{targeted_top_prediction}')}, Control top prediction: {self.class_names.get(control_top_prediction, f'class_{control_top_prediction}')}"
+            f"\nTarget top probs: {targeted_top_probs[:3]}, Control top probs: {control_top_probs[:3]}"
         )
 
         return overall_success, results

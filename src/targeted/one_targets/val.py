@@ -139,6 +139,7 @@ class ImageValidator:
 
         logger.info(
             f"Test 1 Results: Success={success}, Top prediction: {top_class_name} (class {original_top_prediction})"
+            f"\nTop probs: {original_top_probs[:3]}"
         )
 
         return success, results

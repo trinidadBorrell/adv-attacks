@@ -125,32 +125,85 @@ def main():
         )
         return
 
-    # Load 16 class mappings and find which ones have available synsets
+    # Load 16 class mappings and find which ones have available directories
     def load_available_class_mappings():
-        import re
+        # Get available directories in dataset (numeric format)
+        available_dirs = [d.name for d in mini_imagenet_path.iterdir() if d.is_dir()]
 
-        # Get available synsets in dataset
-        available_synsets = [d.name for d in mini_imagenet_path.iterdir() if d.is_dir()]
+        # Load imagenet class names and create mapping
+        class_names = {}
+        with open("imagenet_classes/imagenet_classes.txt", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and ", " in line:
+                    try:
+                        parts = line.split(", ", 1)
+                        if len(parts) == 2:
+                            class_idx = int(parts[0])
+                            class_name = parts[1].lower()
+                            class_names[class_idx] = class_name
+                    except (ValueError, IndexError):
+                        continue
 
-        # Load 16 class mapping
-        with open("imagenet_classes/16_class_mapping.txt", "r") as f:
-            content = f.read()
+        # Define manual mapping for categories to ImageNet class indices
+        # Based on examining imagenet_classes.txt for cat-related entries
+        category_to_indices = {
+            "cat": [
+                281,
+                282,
+                283,
+                284,
+                285,
+            ],  # tabby, tiger_cat, Persian_cat, Siamese_cat, Egyptian_cat
+            "dog": list(range(151, 270)),  # dog breeds are roughly in this range
+            "bird": list(range(7, 146)),  # birds are roughly in this range
+            "bottle": [440, 899],  # beer bottle, water bottle
+            "airplane": [404],  # airliner
+            "car": [436, 511, 817],  # beach wagon, convertible, sports car
+            "chair": [423, 559, 765],  # barber chair, folding chair, rocking chair
+            "bicycle": [444, 671],  # bicycle-built-for-two, mountain bike
+            "boat": [
+                472,
+                554,
+                625,
+                724,
+                780,
+                814,
+            ],  # canoe, fireboat, lifeboat, pirate ship, school bus, speedboat
+            "truck": [
+                555,
+                569,
+                656,
+                717,
+                757,
+                864,
+            ],  # fire engine, garbage truck, minivan, pickup truck, recreational vehicle, tow truck
+            "bear": [
+                294,
+                295,
+                296,
+                297,
+            ],  # brown bear, American black bear, ice bear, sloth bear
+            "elephant": [385, 386],  # Indian elephant, African elephant
+            "clock": [409, 531, 892],  # analog clock, digital clock, wall clock
+            "oven": [544, 766],  # Dutch oven, rotisserie
+            "knife": [499],  # cleaver
+            "keyboard": [508],  # computer keyboard
+        }
 
-        # Parse mapping to find which classes have available synsets
-        class_synsets = {}
-        for line in content.split("\n"):
-            if "=" in line and "[" in line:
-                category = line.split("=")[0].strip()
-                synsets_match = re.findall(r"n\d{8}", line)
-                if synsets_match:
-                    # Only keep synsets that are actually available in our dataset
-                    available_for_category = [
-                        s for s in synsets_match if s in available_synsets
-                    ]
-                    if available_for_category:
-                        class_synsets[category] = available_for_category
+        # Check which categories have available directories
+        class_directories = {}
+        for category, indices in category_to_indices.items():
+            available_dirs_for_category = []
+            for idx in indices:
+                dir_name = f"{idx:05d}"
+                if dir_name in available_dirs:
+                    available_dirs_for_category.append(dir_name)
 
-        return class_synsets
+            if available_dirs_for_category:
+                class_directories[category] = available_dirs_for_category
+
+        return class_directories
 
     class_mappings = load_available_class_mappings()
     logger.info(
@@ -167,19 +220,19 @@ def main():
             continue
 
         category_images = []
-        synsets = class_mappings[category]
+        directories = class_mappings[category]
 
-        for synset in synsets:
-            synset_dir = mini_imagenet_path / synset
-            if synset_dir.exists():
+        for dir_name in directories:
+            dir_path = mini_imagenet_path / dir_name
+            if dir_path.exists():
                 images = (
-                    list(synset_dir.glob("*.JPEG"))
-                    + list(synset_dir.glob("*.jpg"))
-                    + list(synset_dir.glob("*.png"))
+                    list(dir_path.glob("*.JPEG"))
+                    + list(dir_path.glob("*.jpg"))
+                    + list(dir_path.glob("*.png"))
                 )
                 category_images.extend([str(img) for img in images])
                 logger.info(
-                    f"Found {len(images)} images in synset {synset} for category {category}"
+                    f"Found {len(images)} images in directory {dir_name} for category {category}"
                 )
 
         image_paths_by_category[category] = category_images

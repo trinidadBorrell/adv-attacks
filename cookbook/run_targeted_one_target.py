@@ -222,9 +222,9 @@ def main():
             category_successes += batch_successes
             processed_images += len(batch_image_paths)
 
-            # Add processed images to used_images set
-            for img_path in batch_image_paths:
-                used_images.add(img_path)
+            # Add only successful images to used_images set
+            for success_result in batch_results["successful_results"]:
+                used_images.add(success_result["image_path"])
 
             # Update overall summary
             overall_summary["total_images"] += batch_results["total_images"]
@@ -238,7 +238,7 @@ def main():
 
             # Increment total iterations and save used images every 10 iterations
             total_iterations += 1
-            if total_iterations % 10 == 0:
+            if total_iterations % 5 == 0:
                 save_used_images(used_images, output_dir)
                 logger.info(
                     f"Checkpoint: Saved used images list at iteration {total_iterations}"

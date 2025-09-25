@@ -213,7 +213,7 @@ def run_batch_attacks(
                         {
                             "image_path": metadata["image_path"],
                             "fine_class_id": metadata["fine_class_id"],
-                            "coarse_class": metadata["coarse_class"],
+                            "coarse_class": metadata["targeted_coarse_class"],
                             "epsilon": metadata["epsilon"],
                             "test_type": metadata["test_type"],
                             "output_folder": metadata["output_folder"],
@@ -252,7 +252,7 @@ def run_batch_attacks(
                             {
                                 "image_path": metadata["image_path"],
                                 "fine_class_id": metadata["fine_class_id"],
-                                "coarse_class": metadata["coarse_class"],
+                                "coarse_class": metadata["targeted_coarse_class"],
                                 "epsilon": metadata["epsilon"],
                                 "test_type": metadata["test_type"],
                                 "output_folder": metadata["output_folder"],
