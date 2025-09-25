@@ -1,9 +1,11 @@
 .venv/
 old_files/
 .ruff_cache/
+notebooks/
 .vscode/
 .DS_Store
 *__pycache__*
 results/
 input/
-mini_imagenet/
+data/
+src/sanitycheck/

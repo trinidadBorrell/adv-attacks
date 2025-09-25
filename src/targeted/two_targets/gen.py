@@ -118,7 +118,8 @@ class AdversarialGenerator:
             probs = F.softmax(ensemble_logits, dim=1)
 
             # Loss targeting specific category
-            loss = -torch.log(probs[0, target_idx])
+            loss = torch.log(probs[0, target_idx])
+
             gradient = torch.autograd.grad(loss, image_var)[0]
 
             # Apply iFGSM
@@ -126,8 +127,28 @@ class AdversarialGenerator:
             adversarial_images.append(adversarial_image)
 
             logger.info(
-                f"Generated adversarial image {i + 1}/3 targeting category {target_idx}"
+                f"Generated adversarial image {i + 1}/4 targeting category {target_idx}"
             )
+        # lastly do the attack for the coarse target class
+        image_var = image.clone().detach().requires_grad_(True)
+
+        normalized_image = self.normalize(image_var)
+
+        ensemble_logits = get_ensemble_logits(normalized_image, self.models)
+
+        probs = F.softmax(ensemble_logits, dim=1)
+
+        loss = torch.log(probs[0, coarse_indices].sum())
+
+        gradient = torch.autograd.grad(loss, image_var)[0]
+
+        adversarial_image = ifgsm_attack(image, epsilon, gradient)
+
+        adversarial_images.append(adversarial_image)
+
+        logger.info(
+            f"Generated adversarial image 4/4 targeting category {coarse_indices}"
+        )
 
         return adversarial_images
 
