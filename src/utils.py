@@ -74,7 +74,7 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         - coarse_indices: List of lists containing ImageNet class indices for each coarse class
     """
 
-    # 16 coarse categories from paper
+    # 16 coarse categories from paper + 4 additional categories
     coarse_labels = [
         "knife",
         "keyboard",
@@ -92,6 +92,10 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         "car",
         "bird",
         "dog",
+        "head_cabbage",
+        "broccoli",
+        "snake",
+        "spider",
     ]
 
     # Correctly mapped ImageNet class indices based on synset_to_name.txt
@@ -344,6 +348,12 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         253,
     ]
 
+    # Additional categories (not from original paper)
+    head_cabbage = [936]  # head cabbage
+    broccoli = [937]  # broccoli
+    snake = [52, 53, 54, 55, 56, 57, 58, 59, 60]  # various snake species
+    spider = [72, 73, 74, 75, 76, 77, 78]  # various spider species
+
     coarse_indices = [
         knife,
         keyboard,
@@ -361,6 +371,10 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         car,
         bird,
         dog,
+        head_cabbage,
+        broccoli,
+        snake,
+        spider,
     ]
 
     # Filter non-empty categories
@@ -391,7 +405,9 @@ def get_ensemble_logits(image: torch.Tensor, models: List[nn.Module]) -> torch.T
 
     for model in models:
         output = model(image)
-        ensemble_outputs.append(output)  # Keep gradients for adversarial attack generation
+        ensemble_outputs.append(
+            output
+        )  # Keep gradients for adversarial attack generation
 
     # Arithmetic mean of logits
     ensemble_logits = torch.mean(torch.stack(ensemble_outputs), dim=0)

@@ -3,7 +3,7 @@
 Clean Untargeted Attack Pipeline
 
 Usage:
-    python run_untargeted_clean.py <epsilons> <categories> [imagenet_folder] <test_type> <output>
+    python run_untargeted.py <epsilons> <categories> [imagenet_folder] <test_type> <output>
 """
 
 import argparse
@@ -18,6 +18,7 @@ from typing import List, Set
 sys.path.append(str(Path(__file__).parent.parent))
 from src.mapping import get_representative_class_for_category
 from src.untargeted.batch_pipeline_multiprocessing import run_batch_attacks
+from src.utils import get_correct_coarse_mappings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def main():
     parser.add_argument(
         "--target_successes",
         type=int,
-        default=5,
+        default=25,
         help="Target number of successful attacks per category (default: 5)",
     )
 
@@ -117,7 +118,8 @@ def main():
         )
         return
 
-    mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
+    #   mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
+    mini_imagenet_path = Path(args.imagenet_folder)
 
     if not mini_imagenet_path.exists():
         logger.error(
@@ -130,66 +132,13 @@ def main():
         # Get available directories in dataset (numeric format)
         available_dirs = [d.name for d in mini_imagenet_path.iterdir() if d.is_dir()]
 
-        # Load imagenet class names and create mapping
-        class_names = {}
-        with open("imagenet_classes/imagenet_classes.txt", "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and ", " in line:
-                    try:
-                        parts = line.split(", ", 1)
-                        if len(parts) == 2:
-                            class_idx = int(parts[0])
-                            class_name = parts[1].lower()
-                            class_names[class_idx] = class_name
-                    except (ValueError, IndexError):
-                        continue
+        # Get correct coarse mappings from utils (DO NOT MODIFY)
+        coarse_labels, coarse_indices = get_correct_coarse_mappings()
 
-        # Define manual mapping for categories to ImageNet class indices
-        # Based on examining imagenet_classes.txt for cat-related entries
-        category_to_indices = {
-            "cat": [
-                281,
-                282,
-                283,
-                284,
-                285,
-            ],  # tabby, tiger_cat, Persian_cat, Siamese_cat, Egyptian_cat
-            "dog": list(range(151, 270)),  # dog breeds are roughly in this range
-            "bird": list(range(7, 146)),  # birds are roughly in this range
-            "bottle": [440, 899],  # beer bottle, water bottle
-            "airplane": [404],  # airliner
-            "car": [436, 511, 817],  # beach wagon, convertible, sports car
-            "chair": [423, 559, 765],  # barber chair, folding chair, rocking chair
-            "bicycle": [444, 671],  # bicycle-built-for-two, mountain bike
-            "boat": [
-                472,
-                554,
-                625,
-                724,
-                780,
-                814,
-            ],  # canoe, fireboat, lifeboat, pirate ship, school bus, speedboat
-            "truck": [
-                555,
-                569,
-                656,
-                717,
-                757,
-                864,
-            ],  # fire engine, garbage truck, minivan, pickup truck, recreational vehicle, tow truck
-            "bear": [
-                294,
-                295,
-                296,
-                297,
-            ],  # brown bear, American black bear, ice bear, sloth bear
-            "elephant": [385, 386],  # Indian elephant, African elephant
-            "clock": [409, 531, 892],  # analog clock, digital clock, wall clock
-            "oven": [544, 766],  # Dutch oven, rotisserie
-            "knife": [499],  # cleaver
-            "keyboard": [508],  # computer keyboard
-        }
+        # Build category_to_indices mapping from the correct coarse mappings
+        category_to_indices = {}
+        for label, indices in zip(coarse_labels, coarse_indices):
+            category_to_indices[label] = indices
 
         # Check which categories have available directories
         class_directories = {}

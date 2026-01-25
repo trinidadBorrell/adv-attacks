@@ -97,7 +97,7 @@ def main():
     parser.add_argument(
         "--target_successes",
         type=int,
-        default=5,
+        default=25,
         help="Target number of successful attacks per category (default: 5)",
     )
 
@@ -118,8 +118,8 @@ def main():
         )
         return
 
-    mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
-
+    # mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
+    mini_imagenet_path = Path(args.imagenet_folder)
     if not mini_imagenet_path.exists():
         logger.error(
             f"Mini-ImageNet dataset not found at {mini_imagenet_path}. Please run: python src/download_images.py"
