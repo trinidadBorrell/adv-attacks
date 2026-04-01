@@ -39,6 +39,13 @@ from ...utils import (
     load_image,
 )
 
+# Flip operation definitions for control image generation
+FLIP_OPERATIONS = {
+    "horizontal": (2,),  # flip width
+    "vertical": (3,),  # flip height
+    "diagonal": (2, 3),  # flip both
+}
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -85,18 +92,11 @@ class AdversarialGenerator:
         # Calculate the original perturbation
         original_perturbation = targeted_image - original_image
 
-        # Define flip operations and their names for clarity
-        flip_operations = {
-            "horizontal": (1, 2),
-            "vertical": (2, 3),
-            "diagonal": (1, 2, 3),
-        }
-
         # Calculate MSE for each flip operation to find maximum difference
         best_mse = -1
         best_perturbation = None
 
-        for flip_name, dims in flip_operations.items():
+        for flip_name, dims in FLIP_OPERATIONS.items():
             flipped_perturbation = torch.flip(original_perturbation, dims)
             mse = torch.nn.functional.mse_loss(
                 flipped_perturbation, original_perturbation
@@ -119,6 +119,116 @@ class AdversarialGenerator:
         control_image = torch.clamp(control_image, min=0, max=1)
 
         return control_image
+
+    def generate_control_image_with_flip(
+        self,
+        original_image: torch.Tensor,
+        targeted_image: torch.Tensor,
+        epsilon: float,
+        flip_type: str,
+    ) -> torch.Tensor:
+        """
+        Generate control image using a specific flip type.
+
+        Args:
+            original_image: Original clean image tensor
+            targeted_image: Adversarially perturbed image tensor
+            epsilon: Maximum perturbation magnitude
+            flip_type: One of 'horizontal', 'vertical', 'diagonal'
+
+        Returns:
+            Control image with specified flip perturbation applied
+        """
+        if flip_type not in FLIP_OPERATIONS:
+            raise ValueError(
+                f"Invalid flip_type: {flip_type}. Must be one of {list(FLIP_OPERATIONS.keys())}"
+            )
+
+        original_perturbation = targeted_image - original_image
+        dims = FLIP_OPERATIONS[flip_type]
+        flipped_perturbation = torch.flip(original_perturbation, dims)
+
+        control_image = original_image + flipped_perturbation
+
+        epsilon_normalized = epsilon / 255
+        control_image = torch.clamp(
+            control_image,
+            min=original_image - epsilon_normalized,
+            max=original_image + epsilon_normalized,
+        )
+        control_image = torch.clamp(control_image, min=0, max=1)
+
+        return control_image
+
+    def get_control_coarse_prediction(
+        self, control_image: torch.Tensor
+    ) -> tuple[str, int, float]:
+        """
+        Get the coarse class prediction for a control image.
+
+        Returns:
+            Tuple of (coarse_label, top_index, top_prob)
+        """
+        normalized_image = self.normalize(control_image)
+        logits = get_ensemble_logits(normalized_image, self.models)
+        probs = F.softmax(logits, dim=1)
+        top_prob, top_idx = torch.max(probs, dim=1)
+        top_idx = top_idx.item()
+        top_prob = top_prob.item()
+
+        # Find which coarse class this belongs to
+        for i, indices in enumerate(self.coarse_indices):
+            if top_idx in indices:
+                return self.coarse_labels[i], top_idx, top_prob
+
+        # Not in any coarse class - return empty string
+        return "", top_idx, top_prob
+
+    def generate_validated_control_image(
+        self,
+        original_image: torch.Tensor,
+        targeted_image: torch.Tensor,
+        epsilon: float,
+        expected_coarse_class: str,
+    ) -> tuple[torch.Tensor | None, str | None]:
+        """
+        Generate a control image that is validated to be classified as the expected coarse class.
+        Tries all flip types until one produces a valid control image.
+
+        Args:
+            original_image: Original clean image tensor
+            targeted_image: Adversarially perturbed image tensor
+            epsilon: Maximum perturbation magnitude
+            expected_coarse_class: The coarse class the control should be classified as
+
+        Returns:
+            Tuple of (control_image, flip_type_used) or (None, None) if no valid control found
+        """
+        flip_order = ["horizontal", "vertical", "diagonal"]
+
+        for flip_type in flip_order:
+            control_image = self.generate_control_image_with_flip(
+                original_image, targeted_image, epsilon, flip_type
+            )
+
+            pred_coarse, pred_idx, pred_prob = self.get_control_coarse_prediction(
+                control_image
+            )
+
+            if pred_coarse.lower() == expected_coarse_class.lower():
+                logger.info(
+                    f"Control validated with {flip_type} flip: predicted '{pred_coarse}' (prob={pred_prob:.4f})"
+                )
+                return control_image, flip_type
+            else:
+                logger.debug(
+                    f"Control with {flip_type} flip failed: predicted '{pred_coarse}' != expected '{expected_coarse_class}'"
+                )
+
+        logger.warning(
+            f"No valid control image found for expected class '{expected_coarse_class}'. All flips failed."
+        )
+        return None, None
 
     def generate_targeted_attacks_top3(
         self, image: torch.Tensor, target_class: str, epsilon: float

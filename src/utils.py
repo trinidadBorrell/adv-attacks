@@ -96,6 +96,7 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         "broccoli",
         "snake",
         "spider",
+        "sheep",
     ]
 
     # Correctly mapped ImageNet class indices based on synset_to_name.txt
@@ -353,6 +354,7 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
     broccoli = [937]  # broccoli
     snake = [52, 53, 54, 55, 56, 57, 58, 59, 60]  # various snake species
     spider = [72, 73, 74, 75, 76, 77, 78]  # various spider species
+    sheep = [348, 349, 350]  # various sheep species
 
     coarse_indices = [
         knife,
@@ -375,6 +377,7 @@ def get_correct_coarse_mappings() -> Tuple[List[str], List[List[int]]]:
         broccoli,
         snake,
         spider,
+        sheep,
     ]
 
     # Filter non-empty categories

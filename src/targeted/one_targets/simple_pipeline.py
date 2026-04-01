@@ -183,9 +183,14 @@ def run_complete_attack_pipeline(
     test_type: int,
     output_dir: Path,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    original_coarse_class: str | None = None,
 ) -> tuple[bool, dict[str, Any], str]:
     """
     Run complete pipeline: validate -> generate -> test -> save (only if successful)
+
+    Args:
+        original_coarse_class: If provided, validates control images are classified as this class.
+                               If None, uses original method without validation.
     """
 
     # Step 1: Validate
@@ -206,11 +211,43 @@ def run_complete_attack_pipeline(
     )
 
     control_images = []
+    valid_targeted_images = []
+
     for targeted_image in targeted_images:
-        control_image = generator.generate_control_image_from_targeted_attack(
-            original_image, targeted_image, epsilon
-        )
+        if original_coarse_class:
+            # Use validated control generation with flip fallback
+            control_image, flip_used = generator.generate_validated_control_image(
+                original_image, targeted_image, epsilon, original_coarse_class
+            )
+            if control_image is None:
+                # No valid control found for this targeted variant - skip it
+                logger.debug(
+                    f"Skipping variant: no valid control for class '{original_coarse_class}'"
+                )
+                continue
+            logger.info(f"Control validated using {flip_used} flip")
+        else:
+            # Legacy: use original method without validation
+            control_image = generator.generate_control_image_from_targeted_attack(
+                original_image, targeted_image, epsilon
+            )
+
         control_images.append(control_image)
+        valid_targeted_images.append(targeted_image)
+
+    # Check if we have any valid variants left
+    if not control_images:
+        logger.warning(
+            "No valid control images found for any variant. Discarding result."
+        )
+        return (
+            False,
+            {"error": "No valid control images - all flips failed validation"},
+            "",
+        )
+
+    # Use only the valid variants
+    targeted_images = valid_targeted_images
 
     # Step 3: Test attacks (any successful variant passes)
     test_success, test_results = test_adversarial_tensors_multiple(

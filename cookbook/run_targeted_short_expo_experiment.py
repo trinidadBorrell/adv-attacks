@@ -323,12 +323,13 @@ def main():
 
             batch_fine_class_ids = [-1] * len(batch_image_paths)
             batch_target_coarse_classes = [target_category] * len(batch_image_paths)
+            batch_original_coarse_classes = [original_category] * len(batch_image_paths)
 
             logger.info(
                 f"Processing batch of {len(batch_image_paths)} matching images..."
             )
 
-            # Run batch processing
+            # Run batch processing with control validation
             batch_results = run_batch_attacks(
                 image_paths=batch_image_paths,
                 fine_class_ids=batch_fine_class_ids,
@@ -337,6 +338,7 @@ def main():
                 test_types=[args.test_type],
                 output_base_dir=output_dir,
                 batch_size=args.batch_size,
+                original_coarse_classes=batch_original_coarse_classes,
             )
 
             # Update counters
@@ -386,6 +388,7 @@ def main():
         batch_image_paths = batch_buffer
         batch_fine_class_ids = [-1] * len(batch_image_paths)
         batch_target_coarse_classes = [target_category] * len(batch_image_paths)
+        batch_original_coarse_classes = [original_category] * len(batch_image_paths)
 
         logger.info(f"Processing final batch of {len(batch_image_paths)} images...")
 
@@ -397,6 +400,7 @@ def main():
             test_types=[args.test_type],
             output_base_dir=output_dir,
             batch_size=args.batch_size,
+            original_coarse_classes=batch_original_coarse_classes,
         )
 
         category_successes += batch_results["successful_attacks"]
