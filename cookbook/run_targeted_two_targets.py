@@ -131,7 +131,7 @@ def main():
         )
         return
 
-    mini_imagenet_path = Path(args.imagenet_folder) / "mini_imagenet"
+    mini_imagenet_path = Path(args.imagenet_folder)
 
     if not mini_imagenet_path.exists():
         logger.error(

@@ -62,7 +62,7 @@ def _process_single_attack(
 
 
 def _process_image_all_combinations(
-    args: tuple[str, int, str, list, list, Path, str],
+    args: tuple[str, int, str, list, list, Path, str, str | None],
 ) -> tuple[bool, dict, str, list]:
     """
     Worker function for parallel processing of a single image with all epsilon/test_type combinations.
@@ -76,6 +76,7 @@ def _process_image_all_combinations(
         test_types,
         output_base_dir,
         device,
+        original_coarse_class,
     ) = args
 
     metadata_list = []
@@ -95,6 +96,7 @@ def _process_image_all_combinations(
                     test_type,
                     output_base_dir,
                     device,
+                    original_coarse_class,
                 )
 
                 # Create metadata for this combination
@@ -152,12 +154,15 @@ def run_batch_attacks(
     output_base_dir: Path,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     batch_size: int = 1,
+    original_coarse_classes: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Run adversarial attacks on a batch of images.
 
     Args:
         batch_size: Number of images to process in parallel (default 1 for sequential processing)
+        original_coarse_classes: If provided, validates control images are classified as these classes.
+                                 Should be same length as image_paths. If None, no validation.
 
     Returns summary statistics.
     """
@@ -166,6 +171,9 @@ def run_batch_attacks(
     # Each task will process ALL epsilon/test_type combinations for that image
     unique_image_tasks = []
     for i, image_path in enumerate(image_paths):
+        original_coarse = (
+            original_coarse_classes[i] if original_coarse_classes else None
+        )
         unique_image_tasks.append(
             (
                 image_path,
@@ -175,6 +183,7 @@ def run_batch_attacks(
                 test_types,
                 output_base_dir,
                 device,
+                original_coarse,
             )
         )
 
