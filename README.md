@@ -86,9 +86,8 @@ For targeted attacks, the algorithm identifies the top-3 most probable fine-grai
 Six pretrained torchvision models are used in combination:
 
 - EfficientNet B4 & B5
-- ResNet 101 & 152
+- ResNet 50 101 & 152
 - Inception V3
-- ResNet 50
 
 Decisions are based on the arithmetic mean of their logits.
 
